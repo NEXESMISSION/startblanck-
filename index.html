@@ -26,6 +26,7 @@
     transform-origin: 0 0;
     overflow: visible;
   }
+  /* arrows below nodes — node clicks are never swallowed by an arrow's hit area */
   #arrows { pointer-events: none; }
 
   .node { position: absolute; user-select: none; }
@@ -83,9 +84,11 @@
   .node.selected { outline: 1.5px dashed #4a90e2; outline-offset: 4px; border-radius: 3px; }
 
   .arrow .line { fill: none; stroke: #2c2c2c; stroke-width: 2; pointer-events: none; }
-  .arrow .hit  { fill: none; stroke: transparent; stroke-width: 14; pointer-events: stroke; cursor: pointer; }
-  .arrow.selected .line { stroke: #4a90e2; }
-  .arrow.drafting .line { stroke: #4a90e2; stroke-dasharray: 6 4; }
+  /* tighter hit area so it doesn't gobble clicks on nearby nodes */
+  .arrow .hit  { fill: none; stroke: transparent; stroke-width: 8; pointer-events: stroke; cursor: pointer; }
+  .arrow.selected .line  { stroke: #4a90e2; }
+  .arrow.selected .hit   { stroke-width: 14; } /* easier to grab once selected */
+  .arrow.drafting .line  { stroke: #4a90e2; stroke-dasharray: 6 4; }
   .waypoint {
     fill: #ffffff; stroke: #4a90e2; stroke-width: 1.5;
     cursor: grab; pointer-events: all;
@@ -108,7 +111,7 @@
     border-radius: 8px;
     padding: 4px 0;
     box-shadow: 0 6px 20px rgba(0,0,0,0.12);
-    min-width: 180px;
+    min-width: 200px;
     font-size: 13px;
     user-select: none;
     display: none;
@@ -124,11 +127,8 @@
   #ctx-menu button.danger { color: #c33; }
   #ctx-menu button.danger:hover { background: #fdecec; }
   #ctx-menu hr { margin: 4px 0; border: none; border-top: 1px solid #eee; }
-  #ctx-menu .hint {
-    padding: 2px 14px 6px; font-size: 11px; color: #888;
-  }
+  #ctx-menu .hint { padding: 4px 14px 6px; font-size: 11px; color: #888; line-height: 1.4; }
 
-  /* STYLE POPUP for text / checkbox */
   #style-popup {
     position: fixed; display: none;
     background: #ffffff;
@@ -174,11 +174,8 @@
     width: 22px; height: 22px;
     cursor: pointer; background: none;
   }
-  #style-popup .sep {
-    width: 1px; height: 20px; background: #e8e8e8; margin: 0 2px;
-  }
+  #style-popup .sep { width: 1px; height: 20px; background: #e8e8e8; margin: 0 2px; }
 
-  /* LIGHTBOX */
   #lightbox {
     position: fixed; inset: 0; background: rgba(0,0,0,0.92);
     display: none; align-items: center; justify-content: center;
@@ -205,7 +202,7 @@
 <body>
 
 <div id="canvas-wrap">
-  <div id="canvas"></div>
+  <!-- arrows BEFORE the canvas: nodes render on top, so node clicks are never blocked -->
   <svg id="arrows" xmlns="http://www.w3.org/2000/svg">
     <defs>
       <marker id="arrowhead" viewBox="0 0 10 10" refX="9" refY="5"
@@ -218,6 +215,7 @@
       </marker>
     </defs>
   </svg>
+  <div id="canvas"></div>
 </div>
 
 <div id="ctx-menu"></div>
@@ -276,7 +274,7 @@
 
   const SVG_NS = 'http://www.w3.org/2000/svg';
 
-  const view = { x: 0, y: 0, scale: 1 };
+  const view   = { x: 0, y: 0, scale: 1 };
   const nodes  = new Map();
   const arrows = new Map();
   let nextId = 1;
@@ -296,12 +294,9 @@
   }
   applyTransform();
 
-  function toWorld(sx, sy) {
-    return { x: (sx - view.x) / view.scale, y: (sy - view.y) / view.scale };
-  }
-  function toScreen(wx, wy) {
-    return { x: wx * view.scale + view.x, y: wy * view.scale + view.y };
-  }
+  function toWorld(sx, sy) { return { x: (sx - view.x) / view.scale, y: (sy - view.y) / view.scale }; }
+  function toScreen(wx, wy){ return { x:  wx * view.scale + view.x,   y:  wy * view.scale + view.y   }; }
+
   function isEditing() {
     const ae = document.activeElement;
     return !!(ae && ae.isContentEditable);
@@ -313,26 +308,88 @@
     return t === 'INPUT' || t === 'SELECT' || t === 'TEXTAREA';
   }
 
-  /* ============================ PERSISTENCE ============================ */
+  /* ============================ DRAG HELPER ============================
+     Centralised drag binding: guarantees listeners are always cleaned up,
+     even if the window loses focus or the user releases outside the window
+     or hits Escape mid-drag. Fixes "drag gets stuck" symptoms.            */
+
+  const _activeDrags = new Set();
+  function bindDrag(mv, up) {
+    let done = false;
+    function cleanup() {
+      if (done) return;
+      done = true;
+      document.removeEventListener('mousemove', mv);
+      document.removeEventListener('mouseup', upWrap);
+      _activeDrags.delete(cleanup);
+    }
+    function upWrap(ev) {
+      try { if (up) up(ev); } catch (e) { console.error(e); }
+      cleanup();
+    }
+    document.addEventListener('mousemove', mv);
+    document.addEventListener('mouseup', upWrap);
+    _activeDrags.add(cleanup);
+    return cleanup;
+  }
+  function abortAllDrags() { for (const c of [..._activeDrags]) c(); }
+  window.addEventListener('blur',           abortAllDrags);
+  window.addEventListener('mouseleave',     abortAllDrags);
+  document.addEventListener('visibilitychange', () => { if (document.hidden) abortAllDrags(); });
+
+  /* ============================ PERSISTENCE ============================
+     Primary store: IndexedDB (large quota — fits embedded image data URLs).
+     Fallback: localStorage with image data URLs stripped, for the rare case
+     IndexedDB is unavailable (e.g. private mode in some browsers).         */
 
   const STORAGE_KEY = 'mindmap.v1';
+  const IDB_NAME = 'mindmap', IDB_STORE = 'state', IDB_KEY = 'main';
+
   let _suppressSave = false;
   let _saveTimer = null;
-  function scheduleSave() {
-    if (_suppressSave) return;
-    if (_saveTimer) return;
-    _saveTimer = setTimeout(() => { _saveTimer = null; saveNow(); }, 250);
+  let _dbPromise = null;
+
+  function _openDb() {
+    if (_dbPromise) return _dbPromise;
+    if (!window.indexedDB) return Promise.reject(new Error('no indexedDB'));
+    _dbPromise = new Promise((resolve, reject) => {
+      const req = indexedDB.open(IDB_NAME, 1);
+      req.onupgradeneeded = () => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains(IDB_STORE)) db.createObjectStore(IDB_STORE);
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror   = () => reject(req.error);
+    });
+    return _dbPromise;
   }
-  function saveNow() {
-    if (_suppressSave) return;
+  function _idbPut(value) {
+    return _openDb().then(db => new Promise((resolve, reject) => {
+      const tx = db.transaction(IDB_STORE, 'readwrite');
+      tx.objectStore(IDB_STORE).put(value, IDB_KEY);
+      tx.oncomplete = () => resolve();
+      tx.onerror    = () => reject(tx.error);
+      tx.onabort    = () => reject(tx.error);
+    }));
+  }
+  function _idbGet() {
+    return _openDb().then(db => new Promise((resolve, reject) => {
+      const tx = db.transaction(IDB_STORE, 'readonly');
+      const req = tx.objectStore(IDB_STORE).get(IDB_KEY);
+      req.onsuccess = () => resolve(req.result);
+      req.onerror   = () => reject(req.error);
+    }));
+  }
+
+  function buildSnapshot() {
     const ns = [];
     for (const el of canvas.children) {
       const n = el._mindNode;
       if (!n) continue;
       const base = { type: n.type, x: n.x, y: n.y };
       if (n.style && Object.keys(n.style).length) base.style = n.style;
-      if (n.type === 'text')        ns.push({ ...base, text: n.el.textContent });
-      else if (n.type === 'image')  ns.push({ ...base, src: n.src });
+      if (n.type === 'text')          ns.push({ ...base, text: n.el.textContent });
+      else if (n.type === 'image')    ns.push({ ...base, src: n.src });
       else if (n.type === 'checkbox') ns.push({ ...base, text: n.span.textContent, checked: !!n.cb.checked });
     }
     const ar = [];
@@ -341,21 +398,36 @@
       if (!a) continue;
       ar.push({ points: a.points.map(p => ({ x: +p.x, y: +p.y })) });
     }
-    const data = {
-      view: { x: view.x, y: view.y, scale: view.scale },
-      nodes: ns,
-      arrows: ar,
-    };
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); }
-    catch (e) { console.warn('mindmap save failed', e); }
+    return { view: { x: view.x, y: view.y, scale: view.scale }, nodes: ns, arrows: ar };
   }
-  function loadNow() {
-    let raw;
-    try { raw = localStorage.getItem(STORAGE_KEY); }
-    catch (e) { return; }
-    if (!raw) return;
-    let data;
-    try { data = JSON.parse(raw); } catch (e) { return; }
+
+  function scheduleSave() {
+    if (_suppressSave) return;
+    if (_saveTimer) return;
+    _saveTimer = setTimeout(() => { _saveTimer = null; saveNow(); }, 250);
+  }
+
+  function saveNow() {
+    if (_suppressSave) return;
+    const data = buildSnapshot();
+    // Primary: IndexedDB (handles big image blobs).
+    _idbPut(data).catch(e => console.warn('idb save failed', e));
+    // Mirror to localStorage too — minus heavy image data URLs — so the
+    // basic state is still recoverable if IndexedDB is unavailable.
+    try {
+      const lsData = {
+        ...data,
+        nodes: data.nodes.map(n =>
+          (n.type === 'image' && typeof n.src === 'string' && n.src.length > 4000)
+            ? { ...n, src: '' }
+            : n
+        ),
+      };
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(lsData));
+    } catch (e) { /* quota — IDB is primary */ }
+  }
+
+  function applySnapshot(data) {
     _suppressSave = true;
     try {
       if (data.view) {
@@ -367,28 +439,37 @@
       if (Array.isArray(data.nodes)) {
         for (const n of data.nodes) {
           let node = null;
-          if (n.type === 'text')
-            node = createTextNode(+n.x || 0, +n.y || 0, n.text || '', false);
-          else if (n.type === 'image' && n.src)
-            node = createImageNode(+n.x || 0, +n.y || 0, n.src);
-          else if (n.type === 'checkbox')
-            node = createCheckboxNode(+n.x || 0, +n.y || 0, n.text || '', !!n.checked);
-          if (node && n.style) {
-            node.style = n.style;
-            applyNodeStyle(node);
-          }
+          if (n.type === 'text')             node = createTextNode(+n.x || 0, +n.y || 0, n.text || '', false);
+          else if (n.type === 'image' && n.src) node = createImageNode(+n.x || 0, +n.y || 0, n.src);
+          else if (n.type === 'checkbox')    node = createCheckboxNode(+n.x || 0, +n.y || 0, n.text || '', !!n.checked);
+          if (node && n.style) { node.style = n.style; applyNodeStyle(node); }
         }
       }
       if (Array.isArray(data.arrows)) {
         for (const a of data.arrows) {
-          if (a.points && a.points.length >= 2) {
+          if (a.points && a.points.length >= 2)
             createArrow(a.points.map(p => ({ x: +p.x, y: +p.y })));
-          }
         }
       }
-    } finally {
-      _suppressSave = false;
+    } finally { _suppressSave = false; }
+  }
+
+  async function loadNow() {
+    let data = null;
+    // Prefer IndexedDB (it's the primary store and has full image data).
+    try { data = await _idbGet(); } catch (e) { /* no idb */ }
+    // Fall back to legacy localStorage if IDB had nothing.
+    if (!data) {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (raw) data = JSON.parse(raw);
+      } catch (e) {}
     }
+    if (!data) return;
+    applySnapshot(data);
+    // After a successful load, mirror back to IDB so any localStorage-only
+    // legacy state graduates into the proper store.
+    saveNow();
   }
 
   /* ============================ SELECTION ============================ */
@@ -425,6 +506,20 @@
   }
   function getSelectedNodes()  { return [...state.selected].filter(it => it.kind === 'node'); }
   function getSelectedArrows() { return [...state.selected].filter(it => it.kind === 'arrow'); }
+
+  /* Find every node under a screen point (topmost first). Used by Alt+click. */
+  function findNodesAtPoint(x, y) {
+    const els = (document.elementsFromPoint && document.elementsFromPoint(x, y)) || [];
+    const items = [];
+    for (const el of els) {
+      let n = el;
+      while (n && n !== document.body) {
+        if (n._mindNode && !items.includes(n._mindNode)) { items.push(n._mindNode); break; }
+        n = n.parentElement || n.parentNode;
+      }
+    }
+    return items;
+  }
 
   /* ============================ EDIT HELPER ============================ */
 
@@ -473,6 +568,20 @@
         startArrowFromMouse(e);
         return;
       }
+      // Alt+click → cycle through stacked nodes at this point
+      if (e.altKey && !e.shiftKey) {
+        e.preventDefault(); e.stopPropagation();
+        const list = findNodesAtPoint(e.clientX, e.clientY);
+        if (list.length > 1) {
+          let idx = -1;
+          for (let i = 0; i < list.length; i++)
+            if (state.selected.has(list[i])) { idx = i; break; }
+          selectOnly(list[(idx + 1) % list.length]);
+        } else {
+          selectOnly(node);
+        }
+        return;
+      }
       if (isEditing() && (node.el.contains(document.activeElement) ||
                           node.el === document.activeElement)) {
         e.stopPropagation();
@@ -493,7 +602,7 @@
       const startPositions = new Map();
       for (const n of draggable) startPositions.set(n, { x: n.x, y: n.y });
 
-      function mv(ev) {
+      bindDrag((ev) => {
         const dx = (ev.clientX - startMouse.x) / view.scale;
         const dy = (ev.clientY - startMouse.y) / view.scale;
         for (const n of draggable) {
@@ -501,14 +610,7 @@
           setNodePos(n, sp.x + dx, sp.y + dy);
         }
         repositionStylePopup();
-      }
-      function up() {
-        document.removeEventListener('mousemove', mv);
-        document.removeEventListener('mouseup', up);
-        scheduleSave();
-      }
-      document.addEventListener('mousemove', mv);
-      document.addEventListener('mouseup', up);
+      }, () => scheduleSave());
     });
   }
 
@@ -560,11 +662,10 @@
     setNodePos(node, x, y);
     nodes.set(node.id, node);
     attachNodeDrag(node);
-    el.addEventListener('dblclick', (e) => {
-      e.stopPropagation();
-      openLightbox(src);
-    });
-    scheduleSave();
+    el.addEventListener('dblclick', (e) => { e.stopPropagation(); openLightbox(src); });
+    // Images are heavy — save IMMEDIATELY (not via the 250 ms debounce) so a
+    // quick tab close right after dropping an image still persists it.
+    saveNow();
     return node;
   }
 
@@ -605,10 +706,8 @@
     if (node.type === 'checkbox') return node.span;
     return null;
   }
-
   function applyNodeStyle(node) {
-    const el = nodeStyleEl(node);
-    if (!el) return;
+    const el = nodeStyleEl(node); if (!el) return;
     const s = node.style || {};
     el.style.fontFamily      = s.fontFamily || '';
     el.style.fontSize        = s.fontSize ? (s.fontSize + 'px') : '';
@@ -616,21 +715,18 @@
     el.style.fontStyle       = s.italic    ? 'italic'   : '';
     el.style.textDecoration  = s.underline ? 'underline': '';
     el.style.color           = s.color || '';
-    if (s.strokeWidth && +s.strokeWidth > 0) {
+    if (s.strokeWidth && +s.strokeWidth > 0)
       el.style.webkitTextStroke = (+s.strokeWidth) + 'px ' + (s.strokeColor || '#000000');
-    } else {
+    else
       el.style.webkitTextStroke = '';
-    }
   }
 
   /* ============================ STYLE POPUP ============================ */
 
   let _styledNode = null;
-
   function repositionStylePopup() {
     if (!_styledNode || !stylePopup.classList.contains('show')) return;
     const r = _styledNode.el.getBoundingClientRect();
-    // measure popup
     const ph = stylePopup.offsetHeight || 36;
     const pw = stylePopup.offsetWidth  || 360;
     let top  = r.top - ph - 10;
@@ -641,7 +737,6 @@
     stylePopup.style.left = left + 'px';
     stylePopup.style.top  = top  + 'px';
   }
-
   function updateStylePopup() {
     const sel = [...state.selected];
     const styleable = sel.length === 1 && sel[0].kind === 'node' &&
@@ -662,10 +757,8 @@
     spStrokeC.value  = s.strokeColor || '#000000';
     spStrokeW.value  = s.strokeWidth || 0;
     stylePopup.classList.add('show');
-    // wait one frame so offsetHeight is correct
     requestAnimationFrame(repositionStylePopup);
   }
-
   function setStyleProp(prop, value) {
     if (!_styledNode) return;
     if (!_styledNode.style) _styledNode.style = {};
@@ -675,23 +768,21 @@
     scheduleSave();
   }
 
-  // Keep clicks inside the popup from deselecting / starting marquee.
   stylePopup.addEventListener('mousedown', (e) => e.stopPropagation());
-
-  spFont.addEventListener  ('change', () => setStyleProp('fontFamily', spFont.value));
-  spSize.addEventListener  ('input',  () => setStyleProp('fontSize',   Math.max(8, Math.min(200, +spSize.value || 16))));
-  spColor.addEventListener ('input',  () => setStyleProp('color',       spColor.value));
-  spStrokeC.addEventListener('input', () => setStyleProp('strokeColor', spStrokeC.value));
-  spStrokeW.addEventListener('change',() => setStyleProp('strokeWidth', +spStrokeW.value));
-  spBold.addEventListener  ('click', () => {
+  spFont.addEventListener   ('change', () => setStyleProp('fontFamily',  spFont.value));
+  spSize.addEventListener   ('input',  () => setStyleProp('fontSize',    Math.max(8, Math.min(200, +spSize.value || 16))));
+  spColor.addEventListener  ('input',  () => setStyleProp('color',       spColor.value));
+  spStrokeC.addEventListener('input',  () => setStyleProp('strokeColor', spStrokeC.value));
+  spStrokeW.addEventListener('change', () => setStyleProp('strokeWidth', +spStrokeW.value));
+  spBold.addEventListener   ('click',  () => {
     const v = !(_styledNode && _styledNode.style && _styledNode.style.bold);
     setStyleProp('bold', v); spBold.classList.toggle('active', v);
   });
-  spItalic.addEventListener('click', () => {
+  spItalic.addEventListener ('click',  () => {
     const v = !(_styledNode && _styledNode.style && _styledNode.style.italic);
     setStyleProp('italic', v); spItalic.classList.toggle('active', v);
   });
-  spULine.addEventListener ('click', () => {
+  spULine.addEventListener  ('click',  () => {
     const v = !(_styledNode && _styledNode.style && _styledNode.style.underline);
     setStyleProp('underline', v); spULine.classList.toggle('active', v);
   });
@@ -783,19 +874,12 @@
         if (!state.selected.has(arrow)) selectOnly(arrow);
         const startMouse = { x: e.clientX, y: e.clientY };
         const startP = { x: pts[i].x, y: pts[i].y };
-        function mv(ev) {
+        bindDrag((ev) => {
           const dx = (ev.clientX - startMouse.x) / view.scale;
           const dy = (ev.clientY - startMouse.y) / view.scale;
           pts[i] = { x: startP.x + dx, y: startP.y + dy };
           renderArrow(arrow);
-        }
-        function up() {
-          document.removeEventListener('mousemove', mv);
-          document.removeEventListener('mouseup', up);
-          scheduleSave();
-        }
-        document.addEventListener('mousemove', mv);
-        document.addEventListener('mouseup', up);
+        }, () => scheduleSave());
       });
       c.addEventListener('dblclick', (e) => {
         if (i > 0 && i < pts.length - 1) {
@@ -815,16 +899,13 @@
     const points = [{ x: start.x, y: start.y }, { x: start.x, y: start.y }];
     const arrow = createArrow(points);
     arrow.el.classList.add('drafting');
-    renderArrow(arrow); // re-render with drafting marker
+    renderArrow(arrow);
 
-    function mv(ev) {
+    bindDrag((ev) => {
       const w = toWorld(ev.clientX, ev.clientY);
       points[points.length - 1] = w;
       renderArrow(arrow);
-    }
-    function up() {
-      document.removeEventListener('mousemove', mv);
-      document.removeEventListener('mouseup', up);
+    }, () => {
       const s  = points[0];
       const e2 = points[points.length - 1];
       if (Math.hypot(e2.x - s.x, e2.y - s.y) < 6 / view.scale) {
@@ -838,9 +919,7 @@
       renderArrow(arrow);
       selectOnly(arrow);
       scheduleSave();
-    }
-    document.addEventListener('mousemove', mv);
-    document.addEventListener('mouseup', up);
+    });
   }
 
   /* ============================ MARQUEE ============================ */
@@ -857,7 +936,7 @@
     const initial = new Set(state.selected);
     let didMove = false;
     let box = null;
-    function update(ev) {
+    bindDrag((ev) => {
       const x = Math.min(startX, ev.clientX);
       const y = Math.min(startY, ev.clientY);
       const w = Math.abs(ev.clientX - startX);
@@ -884,7 +963,6 @@
           if (pointInRect(sp.x, sp.y, mr)) { inside.add(a); break; }
         }
       }
-      // recompute selection (without flickering popup if same)
       for (const it of [...state.selected]) {
         if (!inside.has(it) && !(additive && initial.has(it))) {
           state.selected.delete(it);
@@ -892,25 +970,16 @@
         }
       }
       if (additive) for (const it of initial) {
-        if (!state.selected.has(it)) {
-          state.selected.add(it); it.el.classList.add('selected');
-        }
+        if (!state.selected.has(it)) { state.selected.add(it); it.el.classList.add('selected'); }
       }
       for (const it of inside) {
-        if (!state.selected.has(it)) {
-          state.selected.add(it); it.el.classList.add('selected');
-        }
+        if (!state.selected.has(it)) { state.selected.add(it); it.el.classList.add('selected'); }
       }
       updateStylePopup();
-    }
-    function up() {
-      document.removeEventListener('mousemove', update);
-      document.removeEventListener('mouseup', up);
+    }, () => {
       if (box) box.remove();
       if (!didMove && !additive) clearSelection();
-    }
-    document.addEventListener('mousemove', update);
-    document.addEventListener('mouseup', up);
+    });
   }
 
   /* ============================ PAN / ZOOM / EMPTY ============================ */
@@ -928,23 +997,23 @@
       wrap.classList.add('panning');
       const startMouse = { x: e.clientX, y: e.clientY };
       const startView  = { x: view.x, y: view.y };
-      function mv(ev) {
+      bindDrag((ev) => {
         view.x = startView.x + (ev.clientX - startMouse.x);
         view.y = startView.y + (ev.clientY - startMouse.y);
         applyTransform();
         repositionStylePopup();
-      }
-      function up() {
-        wrap.classList.remove('panning');
-        document.removeEventListener('mousemove', mv);
-        document.removeEventListener('mouseup', up);
-        scheduleSave();
-      }
-      document.addEventListener('mousemove', mv);
-      document.addEventListener('mouseup', up);
+      }, () => { wrap.classList.remove('panning'); scheduleSave(); });
       return;
     }
     startMarquee(e);
+  });
+
+  // DOUBLE-CLICK on empty area → add a text node where the user clicked.
+  wrap.addEventListener('dblclick', (e) => {
+    if (e.target !== wrap && e.target !== canvas && e.target !== arrowsSvg) return;
+    if (e.ctrlKey || e.metaKey || e.shiftKey || e.altKey || state.spaceDown) return;
+    const w = toWorld(e.clientX, e.clientY);
+    createTextNode(w.x, w.y, '', true);
   });
 
   wrap.addEventListener('wheel', (e) => {
@@ -1019,6 +1088,7 @@
     if (e.key === 'ArrowUp'   && !isEditing()) { if (bringSelectedForward())  e.preventDefault(); return; }
     if (e.key === 'ArrowDown' && !isEditing()) { if (sendSelectedBackward())  e.preventDefault(); return; }
     if (e.key === 'Escape') {
+      abortAllDrags();
       if (lb.classList.contains('show')) closeLightbox();
       else if (ctxMenu.classList.contains('show')) hideContextMenu();
       else clearSelection();
@@ -1031,7 +1101,6 @@
       for (const a of arrows.values()) addToSelection(a);
       return;
     }
-    // V = open right-click menu at mouse position
     if (e.key.toLowerCase() === 'v' && !e.ctrlKey && !e.metaKey && !e.altKey
         && !isEditing() && !isFormFocused()) {
       e.preventDefault();
@@ -1041,7 +1110,6 @@
       showContextMenu({ clientX: x, clientY: y }, target);
       return;
     }
-    // B = remove selected (alias for Delete)
     if (e.key.toLowerCase() === 'b' && !e.ctrlKey && !e.metaKey && !e.altKey
         && !isEditing() && !isFormFocused()) {
       e.preventDefault();
@@ -1058,8 +1126,8 @@
     setCtrlIndicator(false);
   });
 
-  // Block native HTML5 drag and stray text-selection on the entire document
-  // — the usual reason Ctrl+drag silently fails on Windows Chrome.
+  // Block native HTML5 drag and stray text-selection so Ctrl+drag and
+  // empty-area drag never get hijacked by the browser.
   document.addEventListener('dragstart',   (e) => e.preventDefault());
   document.addEventListener('selectstart', (e) => {
     if (!isEditing() && !isFormFocused()) e.preventDefault();
@@ -1098,8 +1166,7 @@
 
   let lbState = { scale: 1, x: 0, y: 0 };
   function applyLb() {
-    lbImg.style.transform =
-      `translate(${lbState.x}px, ${lbState.y}px) scale(${lbState.scale})`;
+    lbImg.style.transform = `translate(${lbState.x}px, ${lbState.y}px) scale(${lbState.scale})`;
   }
   function openLightbox(src) {
     lbImg.src = src;
@@ -1130,18 +1197,11 @@
     const start = { x: e.clientX, y: e.clientY };
     const sp = { x: lbState.x, y: lbState.y };
     lbImg.classList.add('dragging');
-    function mv(ev) {
+    bindDrag((ev) => {
       lbState.x = sp.x + (ev.clientX - start.x);
       lbState.y = sp.y + (ev.clientY - start.y);
       applyLb();
-    }
-    function up() {
-      lbImg.classList.remove('dragging');
-      document.removeEventListener('mousemove', mv);
-      document.removeEventListener('mouseup', up);
-    }
-    document.addEventListener('mousemove', mv);
-    document.addEventListener('mouseup', up);
+    }, () => lbImg.classList.remove('dragging'));
   });
 
   /* ============================ CONTEXT MENU ============================ */
@@ -1219,7 +1279,7 @@
         try { localStorage.removeItem(STORAGE_KEY); } catch (e) {}
       }, { danger: true });
       addSep();
-      addHint('V = open menu · Ctrl+drag = arrow · Space+drag = pan');
+      addHint('V = open menu · double-click empty = add text · Alt+click = cycle stacked nodes · Ctrl+drag = arrow · Space+drag = pan');
     }
 
     ctxMenu.style.left = e.clientX + 'px';
@@ -1269,8 +1329,11 @@
 
   /* ============================ INIT ============================ */
 
-  loadNow();
+  loadNow().catch(e => console.warn('mindmap load failed', e));
   window.addEventListener('beforeunload', saveNow);
+  // 'pagehide' fires more reliably than beforeunload on mobile and on tab
+  // switches that the browser may suspend — extra safety net.
+  window.addEventListener('pagehide', saveNow);
 })();
 </script>
 </body>
