@@ -113,8 +113,10 @@
   .waypoint {
     fill: #ffffff; stroke: #4a90e2; stroke-width: 1.5;
     cursor: grab; pointer-events: all;
+    display: none; /* hidden until the arrow is selected */
   }
   .waypoint.endpoint { fill: #4a90e2; }
+  .arrow.selected .waypoint { display: inline; }
 
   #file-input { display: none; }
 
