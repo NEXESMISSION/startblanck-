@@ -104,10 +104,10 @@
   .node.selected { outline: 1.5px dashed #4a90e2; outline-offset: 4px; border-radius: 3px; }
 
   .arrow .line { fill: none; stroke: #2c2c2c; stroke-width: 2; pointer-events: none; }
-  /* tighter hit area so it doesn't gobble clicks on nearby nodes */
-  .arrow .hit  { fill: none; stroke: transparent; stroke-width: 8; pointer-events: stroke; cursor: pointer; }
+  /* narrow hit area at all times — wider widths swallow clicks meant for
+     nearby empty space (which is how you deselect). */
+  .arrow .hit  { fill: none; stroke: transparent; stroke-width: 6; pointer-events: stroke; cursor: pointer; }
   .arrow.selected .line  { stroke: #4a90e2; }
-  .arrow.selected .hit   { stroke-width: 14; } /* easier to grab once selected */
   .arrow.drafting .line  { stroke: #4a90e2; stroke-width: 2.5; stroke-dasharray: 6 4; }
   .arrow .start-dot { fill: #4a90e2; stroke: #ffffff; stroke-width: 1.5; pointer-events: none; }
   .waypoint {
@@ -605,7 +605,10 @@
 
   // Translate every selected node AND every selected arrow as one rigid group.
   // Used by node-drag and by clicking on an arrow line to drag the arrow itself.
-  function startMoveDrag(e) {
+  // If `deselectOnNoMove` is provided and the user releases without dragging
+  // past the 3 px threshold, that item is removed from the selection — gives
+  // an obvious "click to deselect" affordance for arrows.
+  function startMoveDrag(e, deselectOnNoMove) {
     const ns = getSelectedNodes();
     const as = getSelectedArrows();
     if (!ns.length && !as.length) return;
@@ -614,8 +617,14 @@
     for (const n of ns) startNodePos.set(n, { x: n.x, y: n.y });
     const startArrowPts = new Map();
     for (const a of as) startArrowPts.set(a, a.points.map(p => ({ x: p.x, y: p.y })));
+    let didMove = false;
 
     bindDrag((ev) => {
+      if (!didMove) {
+        const d = Math.abs(ev.clientX - startMouse.x) + Math.abs(ev.clientY - startMouse.y);
+        if (d > 3) didMove = true;
+      }
+      if (!didMove) return;
       const dx = (ev.clientX - startMouse.x) / view.scale;
       const dy = (ev.clientY - startMouse.y) / view.scale;
       for (const n of ns) {
@@ -628,7 +637,14 @@
         renderArrow(a);
       }
       repositionStylePopup();
-    }, () => scheduleSave());
+    }, () => {
+      if (didMove) scheduleSave();
+      else if (deselectOnNoMove && state.selected.has(deselectOnNoMove)) {
+        state.selected.delete(deselectOnNoMove);
+        deselectOnNoMove.el.classList.remove('selected');
+        updateStylePopup();
+      }
+    });
   }
 
   function attachNodeDrag(node) {
@@ -894,12 +910,16 @@
       if (e.shiftKey) {
         toggleSelect(arrow);
         if (!state.selected.has(arrow)) return;
-      } else if (!state.selected.has(arrow)) {
-        selectOnly(arrow);
+        startMoveDrag(e);
+        return;
       }
-      // Drag the line itself — translates the whole arrow (and any other
-      // selected items) as one rigid group.
-      startMoveDrag(e);
+      const wasSelected = state.selected.has(arrow);
+      if (!wasSelected) selectOnly(arrow);
+      // If this arrow is the sole selection, a no-drag click DESELECTS it
+      // (so users have an obvious way to "click off" an arrow). Drag still
+      // translates the arrow normally.
+      const sole = wasSelected && state.selected.size === 1;
+      startMoveDrag(e, sole ? arrow : null);
     });
     hit.addEventListener('dblclick', (e) => {
       e.stopPropagation();
