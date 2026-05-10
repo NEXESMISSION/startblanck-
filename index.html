@@ -4,11 +4,20 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Mind Map</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
   * { box-sizing: border-box; }
-  html, body { margin: 0; height: 100%; overflow: hidden;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
-    user-select: none; -webkit-user-select: none; }
+  html, body {
+    margin: 0; height: 100%; overflow: hidden;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    font-feature-settings: "kern" 1, "calt" 1, "ss01" 1;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    color: #09090b;
+    user-select: none; -webkit-user-select: none;
+  }
 
   #canvas-wrap {
     position: fixed; inset: 0;
@@ -24,14 +33,20 @@
   #canvas-wrap.arrow-mode .arrow .hit { cursor: crosshair !important; }
 
   #mode-badge {
-    position: fixed; top: 10px; right: 10px;
-    background: #3b82f6; color: #fff;
-    padding: 6px 12px; border-radius: 6px;
-    font-size: 12px; font-weight: 500;
+    position: fixed; top: 14px; right: 14px;
+    background: rgba(9,9,11,0.85);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    color: #fafafa;
+    padding: 8px 14px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 500;
+    letter-spacing: -0.005em;
     z-index: 200;
     display: none;
     pointer-events: none;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.18);
+    box-shadow: 0 6px 20px rgba(0,0,0,0.20);
   }
   #mode-badge.show { display: block; }
 
@@ -84,12 +99,14 @@
 
   .node.text {
     white-space: pre;
-    padding: 2px 4px;
+    padding: 4px 6px;
     min-width: 14px;
-    min-height: 1.3em;
-    color: #1c1c1c;
+    min-height: 1.4em;
+    color: #09090b;
     font-size: 16px;
-    line-height: 1.35;
+    line-height: 1.45;
+    letter-spacing: -0.011em;
+    font-weight: 450;
     cursor: move;
     outline: none;
     border: none;
@@ -112,9 +129,12 @@
   }
 
   .node.checkbox {
-    display: flex; align-items: flex-start; gap: 6px;
+    display: flex; align-items: flex-start; gap: 9px;
     cursor: move;
-    font-size: 16px; line-height: 1.35; color: #1c1c1c;
+    font-size: 16px; line-height: 1.45; color: #09090b;
+    letter-spacing: -0.011em;
+    font-weight: 450;
+    padding: 4px 6px;
   }
   .node.checkbox input[type=checkbox] {
     appearance: none;
@@ -155,9 +175,13 @@
   }
   .node.checkbox.checked span { text-decoration: line-through; color: #888; }
 
-  .node.selected { outline: 1.5px solid #3b82f6; outline-offset: 3px; border-radius: 4px; }
+  .node.selected {
+    outline: none;
+    box-shadow: 0 0 0 1.5px #3b82f6, 0 0 0 5px rgba(59,130,246,0.18);
+    border-radius: 6px;
+  }
 
-  .arrow .line { fill: none; stroke: #2c2c2c; stroke-width: 2; pointer-events: none; }
+  .arrow .line { fill: none; stroke: #18181b; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
   /* narrow hit area at all times — wider widths swallow clicks meant for
      nearby empty space (which is how you deselect). */
   .arrow .hit  { fill: none; stroke: transparent; stroke-width: 6; pointer-events: stroke; cursor: pointer; }
@@ -176,19 +200,24 @@
 
   #marquee {
     position: fixed; pointer-events: none;
-    border: 1.5px solid #3b82f6;
-    background: rgba(59,130,246,0.10);
+    border: 1px solid #3b82f6;
+    background: rgba(59,130,246,0.08);
+    border-radius: 4px;
     z-index: 50;
   }
 
   #ctx-menu {
     position: fixed; z-index: 200;
-    background: #ffffff;
-    border: 1px solid #d8d8d8;
-    border-radius: 8px;
-    padding: 4px 0;
-    box-shadow: 0 6px 20px rgba(0,0,0,0.12);
-    min-width: 200px;
+    background: rgba(255,255,255,0.78);
+    backdrop-filter: blur(24px) saturate(180%);
+    -webkit-backdrop-filter: blur(24px) saturate(180%);
+    border: 1px solid rgba(0,0,0,0.06);
+    border-radius: 14px;
+    padding: 6px;
+    box-shadow:
+      0 16px 40px rgba(15,23,42,0.14),
+      0 2px 8px rgba(15,23,42,0.06);
+    min-width: 230px;
     font-size: 13px;
     user-select: none;
     display: none;
@@ -196,26 +225,39 @@
   #ctx-menu.show { display: block; }
   #ctx-menu button {
     display: block; width: 100%; text-align: left;
-    background: none; border: none; padding: 7px 14px;
-    cursor: pointer; color: #232323;
+    background: none; border: none;
+    padding: 8px 12px;
+    border-radius: 8px;
+    cursor: pointer;
+    color: #18181b;
     font: inherit;
+    font-weight: 450;
+    letter-spacing: -0.005em;
+    transition: background 0.1s ease;
   }
-  #ctx-menu button:hover { background: #f1f5fb; }
-  #ctx-menu button.danger { color: #c33; }
-  #ctx-menu button.danger:hover { background: #fdecec; }
-  #ctx-menu hr { margin: 4px 0; border: none; border-top: 1px solid #eee; }
-  #ctx-menu .hint { padding: 4px 14px 6px; font-size: 11px; color: #888; line-height: 1.4; }
+  #ctx-menu button:hover { background: rgba(15,23,42,0.06); }
+  #ctx-menu button.danger { color: #dc2626; }
+  #ctx-menu button.danger:hover { background: rgba(220,38,38,0.08); }
+  #ctx-menu hr { margin: 4px 8px; border: none; border-top: 1px solid rgba(0,0,0,0.06); }
+  #ctx-menu .hint {
+    padding: 6px 12px 8px; font-size: 11px; color: #71717a;
+    line-height: 1.5; letter-spacing: -0.005em;
+  }
 
   #style-popup {
     position: fixed; display: none;
-    background: #ffffff;
-    border: 1px solid #d8d8d8;
-    border-radius: 8px;
-    padding: 4px;
-    box-shadow: 0 4px 14px rgba(0,0,0,0.10);
+    background: rgba(255,255,255,0.78);
+    backdrop-filter: blur(24px) saturate(180%);
+    -webkit-backdrop-filter: blur(24px) saturate(180%);
+    border: 1px solid rgba(0,0,0,0.06);
+    border-radius: 14px;
+    padding: 6px;
+    box-shadow:
+      0 12px 32px rgba(15,23,42,0.12),
+      0 2px 6px rgba(15,23,42,0.04);
     z-index: 150;
     align-items: center;
-    gap: 4px;
+    gap: 2px;
     font-size: 12px;
     user-select: none;
   }
@@ -223,35 +265,56 @@
   #style-popup select,
   #style-popup input[type=number],
   #style-popup button {
-    border: 1px solid #e0e0e0;
-    border-radius: 5px;
-    background: white;
-    padding: 0 6px;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    background: transparent;
+    padding: 0 10px;
     font-size: 12px;
+    font-weight: 500;
+    letter-spacing: -0.005em;
     cursor: pointer;
     font-family: inherit;
-    height: 28px;
-    color: #333;
-    line-height: 26px;
+    height: 30px;
+    color: #18181b;
+    line-height: 28px;
+    transition: background 0.12s ease;
   }
-  #style-popup input[type=number] { width: 54px; padding: 0 4px; cursor: text; }
-  #style-popup button { min-width: 28px; }
-  #style-popup button.active { background: #3b82f6; color: white; border-color: #3b82f6; }
+  #style-popup select:hover,
+  #style-popup input[type=number]:hover,
+  #style-popup button:hover { background: rgba(15,23,42,0.06); }
+  #style-popup input[type=number] { width: 50px; padding: 0 6px; cursor: text; }
+  #style-popup input[type=number]:focus { background: rgba(15,23,42,0.06); outline: none; }
+  #style-popup button { min-width: 30px; }
+  #style-popup button.active {
+    background: #18181b;
+    color: #ffffff;
+  }
+  #style-popup button.active:hover { background: #27272a; }
   #style-popup .swatch {
-    display: inline-flex; align-items: center; gap: 3px;
-    padding: 2px 4px;
-    border: 1px solid #e0e0e0;
-    border-radius: 5px;
-    height: 28px;
-    color: #555;
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 0 8px;
+    border-radius: 8px;
+    height: 30px;
+    color: #71717a;
     font-weight: 600;
+    transition: background 0.12s ease;
+    cursor: pointer;
   }
+  #style-popup .swatch:hover { background: rgba(15,23,42,0.06); }
   #style-popup input[type=color] {
     border: none; padding: 0;
-    width: 22px; height: 22px;
+    width: 18px; height: 18px;
+    border-radius: 4px;
     cursor: pointer; background: none;
   }
-  #style-popup .sep { width: 1px; height: 20px; background: #e8e8e8; margin: 0 2px; }
+  #style-popup .sep { width: 1px; height: 18px; background: rgba(0,0,0,0.08); margin: 0 4px; }
+  #style-popup select {
+    appearance: none; -webkit-appearance: none;
+    padding-right: 22px;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath fill='%2371717a' d='M5 6 0 0h10z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 8px center;
+  }
 
   #lightbox {
     position: fixed; inset: 0; background: rgba(0,0,0,0.92);
@@ -284,7 +347,7 @@
     <defs>
       <marker id="arrowhead" viewBox="0 0 10 10" refX="9" refY="5"
         markerUnits="strokeWidth" markerWidth="5" markerHeight="5" orient="auto">
-        <path d="M 0 0 L 10 5 L 0 10 z" fill="#2c2c2c"/>
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="#18181b"/>
       </marker>
       <marker id="arrowhead-draft" viewBox="0 0 10 10" refX="9" refY="5"
         markerUnits="strokeWidth" markerWidth="5" markerHeight="5" orient="auto">
@@ -390,7 +453,7 @@
   // Wheel order, clockwise from the top.
   const SHAPE_WHEEL_ORDER = ['star', 'heart', 'rect', 'ellipse', 'triangle', 'diamond'];
   const SHAPE_ICON = { rect:'▭', ellipse:'○', triangle:'△', diamond:'◇', star:'☆', heart:'♡' };
-  const SHAPE_DEFAULT = { fill: 'rgba(59,130,246,0.15)', stroke: '#3b82f6', strokeWidth: 2 };
+  const SHAPE_DEFAULT = { fill: '#ffffff', stroke: '#18181b', strokeWidth: 1.5 };
 
   function makeShapeSvg(shape) {
     let el;
