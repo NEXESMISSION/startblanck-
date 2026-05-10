@@ -35,14 +35,19 @@
   }
   #mode-badge.show { display: block; }
 
-  #canvas, #arrows {
+  #canvas {
     position: absolute; left: 0; top: 0;
     width: 0; height: 0;
     transform-origin: 0 0;
     overflow: visible;
   }
   /* arrows below nodes — node clicks are never swallowed by an arrow's hit area */
-  #arrows { pointer-events: none; }
+  #arrows {
+    position: absolute; inset: 0;
+    width: 100%; height: 100%;
+    pointer-events: none;
+    overflow: visible;
+  }
 
   .node { position: absolute; user-select: none; }
 
@@ -230,6 +235,7 @@
         <path d="M 0 0 L 10 5 L 0 10 z" fill="#4a90e2"/>
       </marker>
     </defs>
+    <g id="arrows-layer"></g>
   </svg>
   <div id="canvas"></div>
 </div>
@@ -271,9 +277,10 @@
 
 <script>
 (function () {
-  const wrap       = document.getElementById('canvas-wrap');
-  const canvas     = document.getElementById('canvas');
-  const arrowsSvg  = document.getElementById('arrows');
+  const wrap        = document.getElementById('canvas-wrap');
+  const canvas      = document.getElementById('canvas');
+  const arrowsSvg   = document.getElementById('arrows');
+  const arrowsLayer = document.getElementById('arrows-layer');
   const fileInput  = document.getElementById('file-input');
   const lb         = document.getElementById('lightbox');
   const lbImg      = document.getElementById('lb-img');
@@ -318,9 +325,14 @@
   }
 
   function applyTransform() {
-    const t = `translate(${view.x}px, ${view.y}px) scale(${view.scale})`;
-    canvas.style.transform = t;
-    arrowsSvg.style.transform = t;
+    canvas.style.transform = `translate(${view.x}px, ${view.y}px) scale(${view.scale})`;
+    // Use SVG-native transform attribute on the inner layer.
+    // CSS transform on a width:0/height:0 SVG renders nothing in some browsers
+    // (the cause of arrows never appearing on screen).
+    arrowsLayer.setAttribute(
+      'transform',
+      `translate(${view.x},${view.y}) scale(${view.scale})`
+    );
   }
   applyTransform();
 
@@ -425,7 +437,7 @@
       else if (n.type === 'checkbox') ns.push({ ...base, text: n.span.textContent, checked: !!n.cb.checked });
     }
     const ar = [];
-    for (const el of arrowsSvg.children) {
+    for (const el of arrowsLayer.children) {
       const a = el._mindArrow;
       if (!a) continue;
       ar.push({ points: a.points.map(p => ({ x: +p.x, y: +p.y })) });
@@ -824,7 +836,7 @@
   function createArrow(points) {
     const g = document.createElementNS(SVG_NS, 'g');
     g.setAttribute('class', 'arrow');
-    arrowsSvg.appendChild(g);
+    arrowsLayer.appendChild(g);
     const arrow = { id: newId(), kind: 'arrow', el: g, points };
     g._mindArrow = arrow;
     arrows.set(arrow.id, arrow);
@@ -1084,7 +1096,7 @@
     const ns = getSelectedNodes();
     const as = getSelectedArrows();
     for (const n of ns) canvas.appendChild(n.el);
-    for (const a of as) arrowsSvg.appendChild(a.el);
+    for (const a of as) arrowsLayer.appendChild(a.el);
     if (ns.length || as.length) { scheduleSave(); return true; }
     return false;
   }
@@ -1096,9 +1108,8 @@
       if (first && first !== ns[i].el) canvas.insertBefore(ns[i].el, first);
     }
     for (const a of as) {
-      const defs = arrowsSvg.querySelector('defs');
-      const ref = defs ? defs.nextSibling : arrowsSvg.firstChild;
-      if (ref && a.el !== ref) arrowsSvg.insertBefore(a.el, ref);
+      const ref = arrowsLayer.firstChild;
+      if (ref && a.el !== ref) arrowsLayer.insertBefore(a.el, ref);
     }
     if (ns.length || as.length) { scheduleSave(); return true; }
     return false;
