@@ -88,7 +88,8 @@
   .arrow .hit  { fill: none; stroke: transparent; stroke-width: 8; pointer-events: stroke; cursor: pointer; }
   .arrow.selected .line  { stroke: #4a90e2; }
   .arrow.selected .hit   { stroke-width: 14; } /* easier to grab once selected */
-  .arrow.drafting .line  { stroke: #4a90e2; stroke-dasharray: 6 4; }
+  .arrow.drafting .line  { stroke: #4a90e2; stroke-width: 2.5; stroke-dasharray: 6 4; }
+  .arrow .start-dot { fill: #4a90e2; stroke: #ffffff; stroke-width: 1.5; pointer-events: none; }
   .waypoint {
     fill: #ffffff; stroke: #4a90e2; stroke-width: 1.5;
     cursor: grab; pointer-events: all;
@@ -856,6 +857,18 @@
     line.setAttribute('marker-end', drafting ? 'url(#arrowhead-draft)' : 'url(#arrowhead)');
     arrow.el.appendChild(line);
 
+    // While drafting an arrow, show a visible dot at the start so the
+    // user gets instant feedback that Ctrl+drag was registered, even
+    // before the cursor has moved.
+    if (drafting) {
+      const dot = document.createElementNS(SVG_NS, 'circle');
+      dot.setAttribute('class', 'start-dot');
+      dot.setAttribute('cx', pts[0].x);
+      dot.setAttribute('cy', pts[0].y);
+      dot.setAttribute('r', 4);
+      arrow.el.appendChild(dot);
+    }
+
     pts.forEach((p, i) => {
       const c = document.createElementNS(SVG_NS, 'circle');
       const isEnd = (i === 0 || i === pts.length - 1);
@@ -1132,6 +1145,24 @@
   document.addEventListener('selectstart', (e) => {
     if (!isEditing() && !isFormFocused()) e.preventDefault();
   });
+
+  // ────────────────────────────────────────────────────────────────────
+  // Universal Ctrl+drag → draw arrow.
+  // Runs in CAPTURE phase at the window level so it always wins,
+  // no matter what node/arrow/UI element is under the cursor.
+  // ────────────────────────────────────────────────────────────────────
+  window.addEventListener('mousedown', (e) => {
+    if (e.button !== 0) return;
+    if (!(e.ctrlKey || e.metaKey)) return;
+    if (e.target && e.target.closest && (
+          e.target.closest('#ctx-menu') ||
+          e.target.closest('#style-popup') ||
+          e.target.closest('#lightbox')))
+      return;
+    e.preventDefault();
+    e.stopPropagation();
+    startArrowFromMouse(e);
+  }, true);
 
   /* ============================ DRAG-DROP IMAGES ============================ */
 
