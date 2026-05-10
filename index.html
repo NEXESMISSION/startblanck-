@@ -18,7 +18,22 @@
   #canvas-wrap.panning   { cursor: grabbing; }
   #canvas-wrap.ctrl-down,
   #canvas-wrap.ctrl-down .node,
-  #canvas-wrap.ctrl-down .arrow .hit { cursor: crosshair !important; }
+  #canvas-wrap.ctrl-down .arrow .hit,
+  #canvas-wrap.arrow-mode,
+  #canvas-wrap.arrow-mode .node,
+  #canvas-wrap.arrow-mode .arrow .hit { cursor: crosshair !important; }
+
+  #mode-badge {
+    position: fixed; top: 10px; right: 10px;
+    background: #4a90e2; color: #fff;
+    padding: 6px 12px; border-radius: 6px;
+    font-size: 12px; font-weight: 500;
+    z-index: 200;
+    display: none;
+    pointer-events: none;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.18);
+  }
+  #mode-badge.show { display: block; }
 
   #canvas, #arrows {
     position: absolute; left: 0; top: 0;
@@ -220,6 +235,7 @@
 </div>
 
 <div id="ctx-menu"></div>
+<div id="mode-badge"></div>
 
 <div id="style-popup">
   <select id="sp-font" title="Font">
@@ -263,6 +279,7 @@
   const lbImg      = document.getElementById('lb-img');
   const lbClose    = document.getElementById('lb-close');
   const ctxMenu    = document.getElementById('ctx-menu');
+  const modeBadge  = document.getElementById('mode-badge');
   const stylePopup = document.getElementById('style-popup');
   const spFont     = document.getElementById('sp-font');
   const spSize     = document.getElementById('sp-size');
@@ -284,9 +301,21 @@
   const state = {
     spaceDown: false,
     ctrlDown: false,
+    arrowMode: false,
     selected: new Set(),
   };
   const _lastMouse = { x: 0, y: 0 };
+
+  function setArrowMode(on) {
+    state.arrowMode = !!on;
+    wrap.classList.toggle('arrow-mode', state.arrowMode);
+    if (state.arrowMode) {
+      modeBadge.textContent = '✎  Arrow mode — click + drag to draw   (Esc to cancel)';
+      modeBadge.classList.add('show');
+    } else {
+      modeBadge.classList.remove('show');
+    }
+  }
 
   function applyTransform() {
     const t = `translate(${view.x}px, ${view.y}px) scale(${view.scale})`;
@@ -334,9 +363,11 @@
     return cleanup;
   }
   function abortAllDrags() { for (const c of [..._activeDrags]) c(); }
-  window.addEventListener('blur',           abortAllDrags);
-  window.addEventListener('mouseleave',     abortAllDrags);
+  window.addEventListener('blur', abortAllDrags);
   document.addEventListener('visibilitychange', () => { if (document.hidden) abortAllDrags(); });
+  // NOTE: window 'mouseleave' was intentionally removed — it fires when the
+  // cursor briefly exits the browser viewport, which kills in-flight drags
+  // (the cause of Ctrl+drag arrows silently dying mid-gesture).
 
   /* ============================ PERSISTENCE ============================
      Primary store: IndexedDB (large quota — fits embedded image data URLs).
@@ -1102,9 +1133,17 @@
     if (e.key === 'ArrowDown' && !isEditing()) { if (sendSelectedBackward())  e.preventDefault(); return; }
     if (e.key === 'Escape') {
       abortAllDrags();
+      if (state.arrowMode) { setArrowMode(false); return; }
       if (lb.classList.contains('show')) closeLightbox();
       else if (ctxMenu.classList.contains('show')) hideContextMenu();
       else clearSelection();
+      return;
+    }
+    // A = toggle arrow drawing mode (alternative to Ctrl+drag)
+    if (e.key.toLowerCase() === 'a' && !e.ctrlKey && !e.metaKey && !e.altKey
+        && !isEditing() && !isFormFocused()) {
+      e.preventDefault();
+      setArrowMode(!state.arrowMode);
       return;
     }
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a' && !isEditing() && !isFormFocused()) {
@@ -1153,14 +1192,17 @@
   // ────────────────────────────────────────────────────────────────────
   window.addEventListener('mousedown', (e) => {
     if (e.button !== 0) return;
-    if (!(e.ctrlKey || e.metaKey)) return;
+    const wantArrow = (e.ctrlKey || e.metaKey || state.arrowMode);
+    if (!wantArrow) return;
     if (e.target && e.target.closest && (
           e.target.closest('#ctx-menu') ||
           e.target.closest('#style-popup') ||
-          e.target.closest('#lightbox')))
+          e.target.closest('#lightbox') ||
+          e.target.closest('#mode-badge')))
       return;
     e.preventDefault();
     e.stopPropagation();
+    if (state.arrowMode) setArrowMode(false);
     startArrowFromMouse(e);
   }, true);
 
@@ -1284,6 +1326,7 @@
       addItem('Add Text Here',     () => createTextNode(wp.x, wp.y, '', true));
       addItem('Add Checkbox Here', () => createCheckboxNode(wp.x, wp.y, 'task', false));
       addItem('Add Image…',        () => fileInput.click());
+      addItem('Draw Arrow (A)',    () => setArrowMode(true));
       addSep();
       if (state.selected.size > 0) {
         addItem(`Bring Selected to Front (${state.selected.size}) ↑`, bringSelectedForward);
@@ -1310,7 +1353,7 @@
         try { localStorage.removeItem(STORAGE_KEY); } catch (e) {}
       }, { danger: true });
       addSep();
-      addHint('V = open menu · double-click empty = add text · Alt+click = cycle stacked nodes · Ctrl+drag = arrow · Space+drag = pan');
+      addHint('A = arrow mode · Ctrl+drag = arrow · V = menu · double-click empty = add text · Alt+click = cycle stacked nodes · Space+drag = pan');
     }
 
     ctxMenu.style.left = e.clientX + 'px';
