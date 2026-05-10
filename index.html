@@ -1262,6 +1262,83 @@
 
   /* ============================ DRAG-DROP IMAGES ============================ */
 
+  /* ============================ CLIPBOARD PASTE ============================
+     Ctrl+V anywhere on the canvas drops the clipboard content as a node:
+     - image files (e.g. a screenshot in your clipboard) → image node
+     - HTML containing <img src="…">                    → image node
+     - a URL pointing at an image                       → image node
+     - plain text                                       → text node
+     Paste happens at the last mouse position (or the view centre if the
+     pointer hasn't moved yet). Skipped while editing text or a form input
+     so normal in-editor paste keeps working.                              */
+
+  function _pastePosition() {
+    if (_lastMouse.x === 0 && _lastMouse.y === 0) {
+      const r = wrap.getBoundingClientRect();
+      return toWorld(r.left + r.width / 2, r.top + r.height / 2);
+    }
+    return toWorld(_lastMouse.x, _lastMouse.y);
+  }
+
+  document.addEventListener('paste', (e) => {
+    if (isEditing() || isFormFocused()) return;
+    const cd = e.clipboardData;
+    if (!cd) return;
+    const w = _pastePosition();
+
+    // 1) image FILE in the clipboard (e.g. system screenshot, copied image)
+    if (cd.items) {
+      let i = 0;
+      for (const item of cd.items) {
+        if (item.kind === 'file' && item.type.startsWith('image/')) {
+          const f = item.getAsFile();
+          if (f) {
+            const reader = new FileReader();
+            const off = i++ * 16;
+            reader.onload = (ev) => createImageNode(w.x + off, w.y + off, ev.target.result);
+            reader.readAsDataURL(f);
+          }
+        }
+      }
+      if (i > 0) { e.preventDefault(); return; }
+    }
+    if (cd.files && cd.files.length) {
+      let i = 0;
+      for (const f of cd.files) {
+        if (!f.type.startsWith('image/')) continue;
+        const reader = new FileReader();
+        const off = i++ * 16;
+        reader.onload = (ev) => createImageNode(w.x + off, w.y + off, ev.target.result);
+        reader.readAsDataURL(f);
+      }
+      if (i > 0) { e.preventDefault(); return; }
+    }
+
+    // 2) HTML clipboard with an <img src=…> (paste from a web page)
+    const html = cd.getData('text/html');
+    if (html) {
+      const m = html.match(/<img[^>]+src=["']([^"']+)["']/i);
+      if (m && m[1]) {
+        e.preventDefault();
+        createImageNode(w.x, w.y, m[1]);
+        return;
+      }
+    }
+
+    // 3) plain text — use it as an image src if it looks like one, else
+    //    create a text node with the pasted text.
+    const text = (cd.getData('text/plain') || cd.getData('text') || '').trim();
+    if (text) {
+      e.preventDefault();
+      if (/^(https?:|data:|blob:)/i.test(text) &&
+          (/\.(png|jpe?g|gif|webp|svg|bmp|avif)(\?|#|$)/i.test(text) || text.startsWith('data:image/'))) {
+        createImageNode(w.x, w.y, text);
+      } else {
+        createTextNode(w.x, w.y, text, false);
+      }
+    }
+  });
+
   wrap.addEventListener('dragover', (e) => { e.preventDefault(); });
   wrap.addEventListener('drop', (e) => {
     e.preventDefault();
