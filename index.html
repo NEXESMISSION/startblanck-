@@ -188,6 +188,42 @@
     border-radius: 6px;
   }
 
+  /* Lock toggle — visible when the node is selected or locked. Locked nodes
+     ignore drag, select, marquee and dblclick; only the lock button itself
+     responds, so the user can unlock. */
+  .node .lock-btn {
+    position: absolute;
+    top: -10px; right: -10px;
+    width: 22px; height: 22px;
+    padding: 0;
+    background: #ffffff;
+    border: 1px solid rgba(0,0,0,0.10);
+    border-radius: 50%;
+    cursor: pointer;
+    display: none;
+    align-items: center; justify-content: center;
+    pointer-events: all;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.12);
+    z-index: 11;
+    color: #71717a;
+    user-select: none;
+    transition: transform 0.12s ease, background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+  }
+  .node.selected .lock-btn,
+  .node.locked   .lock-btn { display: flex; }
+  .node.locked   .lock-btn {
+    background: #18181b;
+    color: #fafafa;
+    border-color: #18181b;
+  }
+  .node .lock-btn:hover { transform: scale(1.12); }
+  .node.locked,
+  .node.locked .text,
+  .node.locked img,
+  .node.locked span,
+  .node.locked > svg { cursor: default !important; }
+  .node.locked .resize-handle { display: none !important; }
+
   .arrow .line { fill: none; stroke: #18181b; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
   /* narrow hit area at all times — wider widths swallow clicks meant for
      nearby empty space (which is how you deselect). */
@@ -577,6 +613,7 @@
     }
 
     attachNodeDrag(node);
+    el.appendChild(makeLockButton(node));
     scheduleSave();
     return node;
   }
@@ -710,6 +747,7 @@
       if (!n) continue;
       const base = { type: n.type, x: n.x, y: n.y };
       if (n.style && Object.keys(n.style).length) base.style = n.style;
+      if (n.locked) base.locked = true;
       if (n.type === 'text')          ns.push({ ...base, text: n.el.textContent });
       else if (n.type === 'image')    ns.push({ ...base, src: n.src });
       else if (n.type === 'checkbox') ns.push({ ...base, text: n.span.textContent, checked: !!n.cb.checked });
@@ -770,6 +808,10 @@
             node.style = n.style;
             if (node.type === 'shape') applyShapeStyle(node);
             else applyNodeStyle(node);
+          }
+          if (node && n.locked) {
+            node.locked = true;
+            node.el.classList.add('locked');
           }
         }
       }
@@ -887,6 +929,40 @@
     node.el.style.top  = y + 'px';
   }
 
+  // Lock button — appears in the top-right corner of each node when it's
+  // selected (so the user can lock it) or when it's locked (so the user can
+  // unlock it). Locked nodes ignore drag, dblclick, marquee, Ctrl+A.
+  const LOCK_SVG =
+    '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" ' +
+    'stroke="currentColor" stroke-width="2.4" stroke-linecap="round" ' +
+    'stroke-linejoin="round">' +
+    '<rect x="5" y="11" width="14" height="10" rx="2"/>' +
+    '<path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>';
+  function makeLockButton(node) {
+    const btn = document.createElement('button');
+    btn.className = 'lock-btn';
+    btn.title = 'Lock / Unlock';
+    btn.setAttribute('contenteditable', 'false');
+    btn.innerHTML = LOCK_SVG;
+    btn.addEventListener('mousedown', (e) => { e.preventDefault(); e.stopPropagation(); });
+    btn.addEventListener('click', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      toggleLock(node);
+    });
+    btn.addEventListener('dblclick', (e) => e.stopPropagation());
+    return btn;
+  }
+  function toggleLock(node) {
+    node.locked = !node.locked;
+    node.el.classList.toggle('locked', node.locked);
+    if (node.locked && state.selected.has(node)) {
+      state.selected.delete(node);
+      node.el.classList.remove('selected');
+      updateStylePopup();
+    }
+    scheduleSave();
+  }
+
   // Translate every selected node AND every selected arrow as one rigid group.
   // Used by node-drag and by clicking on an arrow line to drag the arrow itself.
   // If `deselectOnNoMove` is provided and the user releases without dragging
@@ -935,6 +1011,13 @@
     node.el.addEventListener('mousedown', (e) => {
       if (e.button !== 0) return;
       if (state.spaceDown) return;
+      // Locked nodes are inert. The lock button itself stops propagation
+      // before reaching here, so reaching this branch means the user clicked
+      // the body of a locked node — ignore.
+      if (node.locked) {
+        e.stopPropagation();
+        return;
+      }
       if (e.ctrlKey || e.metaKey) {
         e.preventDefault(); e.stopPropagation();
         startArrowFromMouse(e);
@@ -1019,6 +1102,7 @@
     nodes.set(node.id, node);
     attachNodeDrag(node);
     el.addEventListener('dblclick', (e) => {
+      if (node.locked) return;
       e.stopPropagation();
       makeEditable(el, () => {
         if (el.textContent.replace(/\s+/g, '') === '') deleteNode(node);
@@ -1031,6 +1115,7 @@
         else { scheduleSave(); repositionStylePopup(); }
       }));
     }
+    el.appendChild(makeLockButton(node));
     scheduleSave();
     return node;
   }
@@ -1048,7 +1133,12 @@
     setNodePos(node, x, y);
     nodes.set(node.id, node);
     attachNodeDrag(node);
-    el.addEventListener('dblclick', (e) => { e.stopPropagation(); openLightbox(src); });
+    el.addEventListener('dblclick', (e) => {
+      if (node.locked) return;
+      e.stopPropagation();
+      openLightbox(src);
+    });
+    el.appendChild(makeLockButton(node));
     // Images are heavy — save IMMEDIATELY (not via the 250 ms debounce) so a
     // quick tab close right after dropping an image still persists it.
     saveNow();
@@ -1077,9 +1167,11 @@
     nodes.set(node.id, node);
     attachNodeDrag(node);
     span.addEventListener('dblclick', (e) => {
+      if (node.locked) return;
       e.stopPropagation();
       makeEditable(span, () => { scheduleSave(); repositionStylePopup(); });
     });
+    el.appendChild(makeLockButton(node));
     scheduleSave();
     return node;
   }
@@ -1505,6 +1597,7 @@
       const mr = { left: x, top: y, right: x + w, bottom: y + h };
       const inside = new Set();
       for (const n of nodes.values()) {
+        if (n.locked) continue;
         const br = n.el.getBoundingClientRect();
         if (rectsOverlap(mr, br)) inside.add(n);
       }
@@ -1655,7 +1748,7 @@
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a' && !isEditing() && !isFormFocused()) {
       e.preventDefault();
       clearSelection();
-      for (const n of nodes.values())  addToSelection(n);
+      for (const n of nodes.values())  if (!n.locked) addToSelection(n);
       for (const a of arrows.values()) addToSelection(a);
       return;
     }
@@ -1921,6 +2014,20 @@
     }
 
     if (target) {
+      // Locked nodes get a minimal menu so the user can still unlock or delete.
+      if (target.kind === 'node' && target.locked) {
+        addItem('Unlock',  () => toggleLock(target));
+        addSep();
+        addItem('Delete',  () => { target.locked = false; deleteNode(target); }, { danger: true });
+        ctxMenu.style.left = e.clientX + 'px';
+        ctxMenu.style.top  = e.clientY + 'px';
+        ctxMenu.classList.add('show');
+        const rr = ctxMenu.getBoundingClientRect();
+        if (rr.right  > window.innerWidth)  ctxMenu.style.left = (window.innerWidth  - rr.width  - 6) + 'px';
+        if (rr.bottom > window.innerHeight) ctxMenu.style.top  = (window.innerHeight - rr.height - 6) + 'px';
+        return;
+      }
+
       if (!state.selected.has(target)) selectOnly(target);
 
       if (target.kind === 'node' && target.type === 'image') {
@@ -1940,6 +2047,10 @@
       }
       addItem('Bring to Front (↑)', bringSelectedForward);
       addItem('Send to Back (↓)',   sendSelectedBackward);
+      if (target.kind === 'node') {
+        addSep();
+        addItem('Lock', () => toggleLock(target));
+      }
       addSep();
       addItem(state.selected.size > 1 ? `Delete ${state.selected.size} items (B)` : 'Delete (B)',
               deleteSelected, { danger: true });
