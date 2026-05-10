@@ -78,18 +78,22 @@
   }
   #mode-badge.show { display: block; }
 
-  /* Shape nodes ── absolute-positioned div. Most shapes contain an inline
-     SVG that stretches to fill the div via viewBox 0 0 100 100 +
-     preserveAspectRatio="none". Rectangles are special: they're rendered
-     directly as a styled div so the corner radius stays pixel-accurate
-     at any aspect ratio (no stretched corners). */
-  .node.shape { cursor: move; }
-  .node.shape > svg { display: block; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
-  .node.shape.shape-rect {
-    background: #ffffff;
-    border: 1.5px solid #18181b;
-    border-radius: 10px;
+  /* Shape nodes ── absolute-positioned div containing an inline SVG.
+     The wrapper div has pointer-events: none so empty interiors of
+     un-filled shapes click through to whatever is behind. The actual
+     painted stroke (and fill, if any) catches the click. */
+  .node.shape { cursor: move; pointer-events: none; }
+  .node.shape > svg {
+    display: block; width: 100%; height: 100%;
+    pointer-events: none; overflow: visible;
   }
+  .node.shape > svg > * {
+    pointer-events: visiblePainted;
+    vector-effect: non-scaling-stroke;
+    cursor: move;
+  }
+  .node.shape .resize-handle,
+  .node.shape .lock-btn { pointer-events: all; }
 
   /* Resize handles for shapes — visible only when the shape is selected. */
   .node.shape .resize-handle {
@@ -215,6 +219,106 @@
     box-shadow: 0 0 0 1.5px #3b82f6, 0 0 0 5px rgba(59,130,246,0.18);
     border-radius: 6px;
   }
+
+  /* Table node — a flexible 2-D grid where each cell is editable text or
+     a checkbox. Right-click a cell toggles its type. */
+  .node.table {
+    background: rgba(255,255,255,0.95);
+    backdrop-filter: blur(12px) saturate(160%);
+    -webkit-backdrop-filter: blur(12px) saturate(160%);
+    border: 1px solid rgba(0,0,0,0.08);
+    border-radius: 12px;
+    box-shadow:
+      0 6px 18px rgba(15,23,42,0.06),
+      0 1px 3px rgba(15,23,42,0.04);
+    padding: 6px;
+    cursor: move;
+    min-width: 200px;
+    font-size: 13px;
+    color: #18181b;
+    user-select: none;
+  }
+  .node.table .t-grid {
+    border-collapse: separate;
+    border-spacing: 0;
+    width: 100%;
+    table-layout: fixed;
+  }
+  .node.table .t-grid td {
+    border: 1px solid rgba(0,0,0,0.07);
+    padding: 7px 10px;
+    min-width: 90px;
+    vertical-align: top;
+    font-weight: 450;
+    letter-spacing: -0.005em;
+  }
+  .node.table .t-grid tr:first-child td { background: rgba(15,23,42,0.025); font-weight: 600; }
+  .node.table .t-grid td:first-child { border-top-left-radius: 0; }
+  .node.table .cell-text {
+    outline: none;
+    white-space: pre-wrap;
+    word-break: break-word;
+    min-height: 1.3em;
+    cursor: text;
+  }
+  .node.table .cell-text[contenteditable="plaintext-only"],
+  .node.table .cell-text[contenteditable="true"] { user-select: text; }
+  .node.table .cell-cb {
+    display: flex; align-items: flex-start; gap: 8px;
+  }
+  .node.table .cell-cb input[type=checkbox] {
+    appearance: none; -webkit-appearance: none;
+    margin: 1px 0 0 0;
+    width: 16px; height: 16px;
+    border: 1.5px solid #d4d4d8;
+    border-radius: 4px;
+    background: #ffffff;
+    cursor: pointer;
+    flex-shrink: 0;
+    position: relative;
+    transition: background 0.12s ease, border-color 0.12s ease;
+  }
+  .node.table .cell-cb input[type=checkbox]:hover { border-color: #3b82f6; }
+  .node.table .cell-cb input[type=checkbox]:checked {
+    background: #3b82f6; border-color: #3b82f6;
+  }
+  .node.table .cell-cb input[type=checkbox]:checked::after {
+    content: '';
+    position: absolute;
+    left: 4px; top: 0;
+    width: 4px; height: 8px;
+    border: solid #ffffff;
+    border-width: 0 2px 2px 0;
+    transform: rotate(45deg);
+  }
+  .node.table .cell-cb.checked .cell-text {
+    text-decoration: line-through;
+    color: #9ca3af;
+  }
+  .node.table .t-controls {
+    display: flex; align-items: center; gap: 6px;
+    padding: 6px 4px 2px;
+    color: #71717a;
+    font-size: 11px;
+  }
+  .node.table .t-controls button {
+    background: none;
+    border: 1px dashed rgba(0,0,0,0.15);
+    border-radius: 6px;
+    padding: 3px 9px;
+    font-size: 11px;
+    font-family: inherit;
+    cursor: pointer;
+    color: #71717a;
+    font-weight: 500;
+    letter-spacing: -0.005em;
+    transition: border-color 0.12s ease, color 0.12s ease;
+  }
+  .node.table .t-controls button:hover {
+    border-color: #3b82f6;
+    color: #3b82f6;
+  }
+  .node.table .t-controls .hint { opacity: 0.7; }
 
   /* Bookmark node — small dark circle with a number, jumpable via Alt+digit. */
   .node.bookmark {
@@ -434,7 +538,11 @@
 <body>
 
 <div id="canvas-wrap">
-  <!-- arrows BEFORE the canvas: nodes render on top, so node clicks are never blocked -->
+  <div id="canvas"></div>
+  <!-- arrows AFTER the canvas: newly drawn arrows render on top of all nodes.
+       The SVG itself has pointer-events: none, so empty space inside the SVG
+       passes clicks through to the nodes below. Only the arrow hit paths and
+       waypoints catch clicks. -->
   <svg id="arrows" xmlns="http://www.w3.org/2000/svg">
     <defs>
       <marker id="arrowhead" viewBox="0 0 10 10" refX="9" refY="5"
@@ -448,7 +556,6 @@
     </defs>
     <g id="arrows-layer"></g>
   </svg>
-  <div id="canvas"></div>
 </div>
 
 <div id="ctx-menu"></div>
@@ -568,7 +675,7 @@
   // Wheel order, clockwise from the top.
   const SHAPE_WHEEL_ORDER = ['star', 'heart', 'rect', 'ellipse', 'triangle', 'diamond'];
   const SHAPE_ICON = { rect:'▭', ellipse:'○', triangle:'△', diamond:'◇', star:'☆', heart:'♡' };
-  const SHAPE_DEFAULT = { fill: '#ffffff', stroke: '#18181b', strokeWidth: 1.5 };
+  const SHAPE_DEFAULT = { fill: 'none', stroke: '#18181b', strokeWidth: 1.5 };
 
   function makeShapeSvg(shape) {
     let el;
@@ -616,24 +723,12 @@
 
   function applyShapeStyle(node) {
     if (!node || node.type !== 'shape') return;
-    const s = node.style || {};
-    const fill   = s.fill        || SHAPE_DEFAULT.fill;
-    const stroke = s.stroke      || SHAPE_DEFAULT.stroke;
-    const sw     = s.strokeWidth || SHAPE_DEFAULT.strokeWidth;
-    if (node.shape === 'rect') {
-      // CSS-styled rectangle — pixel-accurate rounded corners.
-      node.el.style.background  = fill;
-      node.el.style.borderColor = stroke;
-      node.el.style.borderWidth = sw + 'px';
-      node.el.style.borderStyle = 'solid';
-      node.el.style.borderRadius = '10px';
-      return;
-    }
     const child = node.shapeEl;
     if (!child) return;
-    child.setAttribute('fill',         fill);
-    child.setAttribute('stroke',       stroke);
-    child.setAttribute('stroke-width', sw);
+    const s = node.style || {};
+    child.setAttribute('fill',         s.fill        || SHAPE_DEFAULT.fill);
+    child.setAttribute('stroke',       s.stroke      || SHAPE_DEFAULT.stroke);
+    child.setAttribute('stroke-width', s.strokeWidth || SHAPE_DEFAULT.strokeWidth);
   }
 
   function createShapeNode(x, y, w, h, shape, style) {
@@ -644,15 +739,12 @@
     el.style.width  = Math.max(2, w) + 'px';
     el.style.height = Math.max(2, h) + 'px';
 
-    let shapeEl = null;
-    if (shape !== 'rect') {
-      const svg = document.createElementNS(SVG_NS, 'svg');
-      svg.setAttribute('viewBox', '0 0 100 100');
-      svg.setAttribute('preserveAspectRatio', 'none');
-      shapeEl = makeShapeSvg(shape);
-      svg.appendChild(shapeEl);
-      el.appendChild(svg);
-    }
+    const svg = document.createElementNS(SVG_NS, 'svg');
+    svg.setAttribute('viewBox', '0 0 100 100');
+    svg.setAttribute('preserveAspectRatio', 'none');
+    const shapeEl = makeShapeSvg(shape);
+    svg.appendChild(shapeEl);
+    el.appendChild(svg);
     canvas.appendChild(el);
 
     const node = {
@@ -821,6 +913,7 @@
       else if (n.type === 'checkbox') ns.push({ ...base, text: n.span.textContent, checked: !!n.cb.checked });
       else if (n.type === 'shape')    ns.push({ ...base, shape: n.shape, w: n.w, h: n.h });
       else if (n.type === 'bookmark') ns.push({ ...base, number: +n.number || 0 });
+      else if (n.type === 'table')    ns.push({ ...base, cols: n.cols, rows: n.rows });
     }
     const ar = [];
     for (const el of arrowsLayer.children) {
@@ -927,6 +1020,7 @@
           else if (n.type === 'checkbox')    node = createCheckboxNode(+n.x || 0, +n.y || 0, n.text || '', !!n.checked);
           else if (n.type === 'shape')      node = createShapeNode(+n.x || 0, +n.y || 0, +n.w || 60, +n.h || 60, n.shape || 'rect', n.style);
           else if (n.type === 'bookmark')   node = createBookmarkNode(+n.x || 0, +n.y || 0, +n.number || 0);
+          else if (n.type === 'table')      node = createTableNode(+n.x || 0, +n.y || 0, n.rows, +n.cols || 2);
           if (node && n.style) {
             node.style = n.style;
             if (node.type === 'shape') applyShapeStyle(node);
@@ -958,11 +1052,11 @@
         if (raw) data = JSON.parse(raw);
       } catch (e) {}
     }
-    if (!data) return;
-    applySnapshot(data);
-    // After a successful load, mirror back to IDB so any localStorage-only
-    // legacy state graduates into the proper store.
+    if (data) applySnapshot(data);
+    // Always run saveNow once on init: it persists the current state and
+    // seeds the undo stack so a single user action immediately enables Undo.
     saveNow();
+    updateHistoryButtons();
   }
 
   /* ============================ SELECTION ============================ */
@@ -1369,6 +1463,190 @@
     return node;
   }
 
+  /* ============================ TABLE NODE ============================
+     A simple 2-D grid where each cell is text by default; right-click a
+     cell to toggle it to a checkbox (and back). Cells edit on dblclick.
+     The "+ row" / "+ col" buttons grow the grid; "− row" / "− col" shrink. */
+
+  function _newTableCell(type)  {
+    return { type: type || 'text', text: '', checked: false };
+  }
+  function _newTableRow(cols) {
+    const r = [];
+    for (let i = 0; i < cols; i++) r.push(_newTableCell('text'));
+    return r;
+  }
+
+  function createTableNode(x, y, rows, cols) {
+    cols = +cols || 2;
+    if (!rows || !rows.length) {
+      rows = [
+        [{ type:'text', text:'Item' },   { type:'text', text:'Status' }],
+        [{ type:'text', text:'Task A' }, { type:'checkbox', text:'', checked:false }],
+        [{ type:'text', text:'Task B' }, { type:'checkbox', text:'', checked:false }],
+      ];
+      cols = 2;
+    } else {
+      cols = rows[0].length || cols;
+    }
+
+    const el = document.createElement('div');
+    el.className = 'node table';
+    canvas.appendChild(el);
+    const node = {
+      id: newId(), kind: 'node', type: 'table', el,
+      x, y,
+      cols: cols,
+      rows: rows.map(r => r.map(c => ({
+        type: (c && c.type) || 'text',
+        text: (c && c.text) || '',
+        checked: !!(c && c.checked),
+      }))),
+      style: {},
+    };
+    el._mindNode = node;
+    setNodePos(node, x, y);
+    nodes.set(node.id, node);
+
+    renderTableContent(node);
+    attachNodeDrag(node);
+    el.appendChild(makeLockButton(node));
+    scheduleSave();
+    return node;
+  }
+
+  function renderTableContent(node) {
+    // Preserve the lock button across re-renders.
+    const lockBtn = node.el.querySelector('.lock-btn');
+    node.el.innerHTML = '';
+
+    const tbl = document.createElement('table');
+    tbl.className = 't-grid';
+    node.rows.forEach((row, ri) => {
+      const tr = document.createElement('tr');
+      row.forEach((cell, ci) => {
+        const td = document.createElement('td');
+        td.dataset.r = ri;
+        td.dataset.c = ci;
+
+        const renderCell = () => {
+          td.innerHTML = '';
+          if (cell.type === 'checkbox') {
+            const wrap = document.createElement('div');
+            wrap.className = 'cell-cb' + (cell.checked ? ' checked' : '');
+            const cb = document.createElement('input');
+            cb.type = 'checkbox';
+            cb.checked = !!cell.checked;
+            cb.addEventListener('mousedown', (e) => e.stopPropagation());
+            cb.addEventListener('click', () => {
+              if (node.locked) { cb.checked = !!cell.checked; return; }
+              cell.checked = cb.checked;
+              wrap.classList.toggle('checked', cb.checked);
+              scheduleSave();
+            });
+            const text = document.createElement('div');
+            text.className = 'cell-text';
+            text.textContent = cell.text || '';
+            text.addEventListener('mousedown', (e) => {
+              if (text.isContentEditable) e.stopPropagation();
+            });
+            text.addEventListener('dblclick', (e) => {
+              if (node.locked) return;
+              e.stopPropagation();
+              makeEditable(text, () => {
+                cell.text = text.textContent;
+                scheduleSave();
+              });
+            });
+            wrap.appendChild(cb);
+            wrap.appendChild(text);
+            td.appendChild(wrap);
+          } else {
+            const text = document.createElement('div');
+            text.className = 'cell-text';
+            text.textContent = cell.text || '';
+            text.addEventListener('mousedown', (e) => {
+              if (text.isContentEditable) e.stopPropagation();
+            });
+            text.addEventListener('dblclick', (e) => {
+              if (node.locked) return;
+              e.stopPropagation();
+              makeEditable(text, () => {
+                cell.text = text.textContent;
+                scheduleSave();
+              });
+            });
+            td.appendChild(text);
+          }
+        };
+        renderCell();
+
+        // Right-click on the cell toggles text ⇄ checkbox.
+        td.addEventListener('contextmenu', (e) => {
+          if (node.locked) return;
+          e.preventDefault();
+          e.stopPropagation();
+          cell.type = cell.type === 'checkbox' ? 'text' : 'checkbox';
+          if (cell.type !== 'checkbox') cell.checked = false;
+          renderCell();
+          scheduleSave();
+        });
+
+        tr.appendChild(td);
+      });
+      tbl.appendChild(tr);
+    });
+    node.el.appendChild(tbl);
+
+    // Controls row
+    const controls = document.createElement('div');
+    controls.className = 't-controls';
+    function btn(label, fn) {
+      const b = document.createElement('button');
+      b.textContent = label;
+      b.addEventListener('mousedown', (e) => e.stopPropagation());
+      b.addEventListener('click', (e) => {
+        if (node.locked) return;
+        e.stopPropagation();
+        fn();
+      });
+      return b;
+    }
+    controls.appendChild(btn('+ row', () => {
+      node.rows.push(_newTableRow(node.cols));
+      renderTableContent(node);
+      scheduleSave();
+    }));
+    controls.appendChild(btn('+ col', () => {
+      node.cols++;
+      node.rows.forEach(r => r.push(_newTableCell('text')));
+      renderTableContent(node);
+      scheduleSave();
+    }));
+    if (node.rows.length > 1) {
+      controls.appendChild(btn('− row', () => {
+        node.rows.pop();
+        renderTableContent(node);
+        scheduleSave();
+      }));
+    }
+    if (node.cols > 1) {
+      controls.appendChild(btn('− col', () => {
+        node.cols--;
+        node.rows.forEach(r => r.pop());
+        renderTableContent(node);
+        scheduleSave();
+      }));
+    }
+    const hint = document.createElement('span');
+    hint.className = 'hint';
+    hint.textContent = 'right-click cell ⇄ checkbox · double-click to edit';
+    controls.appendChild(hint);
+    node.el.appendChild(controls);
+
+    if (lockBtn) node.el.appendChild(lockBtn);
+  }
+
   /* ============================ STYLE APPLY ============================ */
 
   function nodeStyleEl(node) {
@@ -1560,42 +1838,16 @@
     }, () => scheduleSave());
   }
 
-  // Swap the rendering of an existing shape node (same bounding box, new shape).
-  // Handles the rect ↔ SVG transition since rect is rendered as a styled div.
+  // Swap the SVG element inside an existing shape node (same bounding box).
   function setShapeType(node, newShape) {
     if (!node || node.type !== 'shape' || node.shape === newShape) return;
-
-    // Remove old rendering
-    if (node.shape === 'rect') {
-      node.el.style.background = '';
-      node.el.style.borderColor = '';
-      node.el.style.borderWidth = '';
-      node.el.style.borderStyle = '';
-      node.el.style.borderRadius = '';
-    } else if (node.shapeEl) {
-      const svg = node.shapeEl.parentNode;
-      if (svg && svg.parentNode === node.el) svg.remove();
-      node.shapeEl = null;
-    }
-
+    const oldEl = node.shapeEl;
+    const newEl = makeShapeSvg(newShape);
+    if (oldEl && oldEl.parentNode) oldEl.parentNode.replaceChild(newEl, oldEl);
+    node.shapeEl = newEl;
     node.el.classList.remove('shape-' + node.shape);
     node.el.classList.add('shape-' + newShape);
     node.shape = newShape;
-
-    // Add new rendering
-    if (newShape !== 'rect') {
-      const svg = document.createElementNS(SVG_NS, 'svg');
-      svg.setAttribute('viewBox', '0 0 100 100');
-      svg.setAttribute('preserveAspectRatio', 'none');
-      const shapeEl = makeShapeSvg(newShape);
-      svg.appendChild(shapeEl);
-      // Insert before any resize handles so handles stay on top in DOM order.
-      const firstHandle = node.el.querySelector('.resize-handle');
-      if (firstHandle) node.el.insertBefore(svg, firstHandle);
-      else node.el.appendChild(svg);
-      node.shapeEl = shapeEl;
-    }
-
     applyShapeStyle(node);
     scheduleSave();
   }
@@ -2361,6 +2613,9 @@
       addItem('Add Bookmark Here (Alt+digit jumps)', () => {
         const num = nextBookmarkNumber();
         selectOnly(createBookmarkNode(wp.x - 18, wp.y - 18, num));
+      });
+      addItem('Add Table Here', () => {
+        selectOnly(createTableNode(wp.x, wp.y));
       });
       addSep();
       addHint('Add shape:');
