@@ -603,6 +603,34 @@
     node.el.style.top  = y + 'px';
   }
 
+  // Translate every selected node AND every selected arrow as one rigid group.
+  // Used by node-drag and by clicking on an arrow line to drag the arrow itself.
+  function startMoveDrag(e) {
+    const ns = getSelectedNodes();
+    const as = getSelectedArrows();
+    if (!ns.length && !as.length) return;
+    const startMouse = { x: e.clientX, y: e.clientY };
+    const startNodePos = new Map();
+    for (const n of ns) startNodePos.set(n, { x: n.x, y: n.y });
+    const startArrowPts = new Map();
+    for (const a of as) startArrowPts.set(a, a.points.map(p => ({ x: p.x, y: p.y })));
+
+    bindDrag((ev) => {
+      const dx = (ev.clientX - startMouse.x) / view.scale;
+      const dy = (ev.clientY - startMouse.y) / view.scale;
+      for (const n of ns) {
+        const sp = startNodePos.get(n);
+        setNodePos(n, sp.x + dx, sp.y + dy);
+      }
+      for (const a of as) {
+        const orig = startArrowPts.get(a);
+        a.points = orig.map(p => ({ x: p.x + dx, y: p.y + dy }));
+        renderArrow(a);
+      }
+      repositionStylePopup();
+    }, () => scheduleSave());
+  }
+
   function attachNodeDrag(node) {
     node.el.addEventListener('mousedown', (e) => {
       if (e.button !== 0) return;
@@ -640,21 +668,7 @@
       } else if (!state.selected.has(node)) {
         selectOnly(node);
       }
-
-      const draggable = getSelectedNodes();
-      const startMouse = { x: e.clientX, y: e.clientY };
-      const startPositions = new Map();
-      for (const n of draggable) startPositions.set(n, { x: n.x, y: n.y });
-
-      bindDrag((ev) => {
-        const dx = (ev.clientX - startMouse.x) / view.scale;
-        const dy = (ev.clientY - startMouse.y) / view.scale;
-        for (const n of draggable) {
-          const sp = startPositions.get(n);
-          setNodePos(n, sp.x + dx, sp.y + dy);
-        }
-        repositionStylePopup();
-      }, () => scheduleSave());
+      startMoveDrag(e);
     });
   }
 
@@ -877,8 +891,15 @@
       }
       e.stopPropagation();
       hideContextMenu();
-      if (e.shiftKey) toggleSelect(arrow);
-      else if (!state.selected.has(arrow)) selectOnly(arrow);
+      if (e.shiftKey) {
+        toggleSelect(arrow);
+        if (!state.selected.has(arrow)) return;
+      } else if (!state.selected.has(arrow)) {
+        selectOnly(arrow);
+      }
+      // Drag the line itself — translates the whole arrow (and any other
+      // selected items) as one rigid group.
+      startMoveDrag(e);
     });
     hit.addEventListener('dblclick', (e) => {
       e.stopPropagation();
