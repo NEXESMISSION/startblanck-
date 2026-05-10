@@ -41,44 +41,27 @@
   .node.shape { cursor: move; }
   .node.shape > svg { display: block; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
 
-  /* Shape wheel — appears at Shift+Ctrl+mousedown. Wedges are absolutely
-     positioned around the (0,0) origin of the wheel container, which is
-     placed at the cursor. */
-  #shape-wheel {
-    position: fixed;
-    pointer-events: none;
-    z-index: 220;
+  /* Resize handles for shapes — visible only when the shape is selected. */
+  .node.shape .resize-handle {
+    position: absolute;
+    width: 10px; height: 10px;
+    background: #ffffff;
+    border: 1.5px solid #4a90e2;
+    border-radius: 2px;
+    pointer-events: all;
     display: none;
-    width: 0; height: 0;
+    z-index: 10;
+    box-sizing: border-box;
   }
-  #shape-wheel.show { display: block; }
-  .shape-wedge {
-    position: absolute;
-    width: 44px; height: 44px;
-    margin-left: -22px; margin-top: -22px;
-    display: flex; align-items: center; justify-content: center;
-    background: rgba(255,255,255,0.97);
-    border: 2px solid #d8d8d8;
-    border-radius: 50%;
-    font-size: 22px;
-    color: #333;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.12);
-    transition: transform .08s, background .08s, border-color .08s, color .08s;
-    pointer-events: none;
-    user-select: none;
-  }
-  .shape-wedge.active {
-    background: #4a90e2; color: #fff; border-color: #4a90e2;
-    transform: scale(1.18);
-  }
-  .shape-wheel-hub {
-    position: absolute;
-    width: 18px; height: 18px;
-    margin-left: -9px; margin-top: -9px;
-    border-radius: 50%;
-    background: #4a90e2;
-    box-shadow: 0 0 0 4px rgba(74,144,226,0.20);
-  }
+  .node.shape.selected .resize-handle { display: block; }
+  .resize-handle.nw { left: -6px;  top: -6px;     cursor: nw-resize; }
+  .resize-handle.n  { left: 50%;   top: -6px;     cursor: n-resize;  margin-left: -5px; }
+  .resize-handle.ne { right: -6px; top: -6px;     cursor: ne-resize; }
+  .resize-handle.e  { right: -6px; top: 50%;      cursor: e-resize;  margin-top: -5px; }
+  .resize-handle.se { right: -6px; bottom: -6px;  cursor: se-resize; }
+  .resize-handle.s  { left: 50%;   bottom: -6px;  cursor: s-resize;  margin-left: -5px; }
+  .resize-handle.sw { left: -6px;  bottom: -6px;  cursor: sw-resize; }
+  .resize-handle.w  { left: -6px;  top: 50%;      cursor: w-resize;  margin-top: -5px; }
 
   #canvas {
     position: absolute; left: 0; top: 0;
@@ -289,7 +272,6 @@
 
 <div id="ctx-menu"></div>
 <div id="mode-badge"></div>
-<div id="shape-wheel"><div class="shape-wheel-hub"></div></div>
 
 <div id="style-popup">
   <select id="sp-font" title="Font">
@@ -335,7 +317,6 @@
   const lbClose    = document.getElementById('lb-close');
   const ctxMenu    = document.getElementById('ctx-menu');
   const modeBadge  = document.getElementById('mode-badge');
-  const shapeWheel = document.getElementById('shape-wheel');
   const stylePopup = document.getElementById('style-popup');
   const spFont     = document.getElementById('sp-font');
   const spSize     = document.getElementById('sp-size');
@@ -444,6 +425,22 @@
     el._mindNode = node;
     nodes.set(node.id, node);
     applyShapeStyle(node);
+
+    // Resize handles — visible only when the shape is selected (CSS).
+    for (const pos of ['nw','n','ne','e','se','s','sw','w']) {
+      const handle = document.createElement('div');
+      handle.className = 'resize-handle ' + pos;
+      handle.addEventListener('mousedown', (ev) => {
+        if (ev.button !== 0) return;
+        if (ev.ctrlKey || ev.metaKey || ev.shiftKey || ev.altKey) return;
+        ev.preventDefault();
+        ev.stopPropagation();
+        if (!state.selected.has(node)) selectOnly(node);
+        startResizeDrag(node, pos, ev);
+      });
+      el.appendChild(handle);
+    }
+
     attachNodeDrag(node);
     scheduleSave();
     return node;
@@ -833,10 +830,17 @@
       if (e.shiftKey) {
         toggleSelect(node);
         if (!state.selected.has(node)) return;
-      } else if (!state.selected.has(node)) {
-        selectOnly(node);
+        startMoveDrag(e);
+        return;
       }
-      startMoveDrag(e);
+      const wasSelected = state.selected.has(node);
+      if (!wasSelected) selectOnly(node);
+      // Shapes get the same click-to-deselect affordance arrows have:
+      // when this shape is the only selection and the user just clicks
+      // (no drag), release deselects it.
+      const sole = wasSelected && state.selected.size === 1;
+      const deselect = (sole && node.type === 'shape') ? node : null;
+      startMoveDrag(e, deselect);
     });
   }
 
@@ -1034,93 +1038,24 @@
     setStyleProp('underline', v); spULine.classList.toggle('active', v);
   });
 
-  /* ============================ SHAPE WHEEL ============================
-     GTA-style radial picker. Triggered by Shift + Ctrl/Cmd + drag.
-     The angle of the drag picks the shape; the distance sizes it.        */
+  /* ============================ SHAPE DRAW & RESIZE ============================
+     Shift + Ctrl/Cmd + drag draws a rectangle interactively. Other shape types
+     are created at default size from the right-click menu and resized with
+     the corner / edge handles below.                                          */
 
-  let _wheelBuilt = false;
-  function buildShapeWheel() {
-    if (_wheelBuilt) return;
-    _wheelBuilt = true;
-    const N = SHAPE_WHEEL_ORDER.length;
-    const r = 78;
-    SHAPE_WHEEL_ORDER.forEach((shape, i) => {
-      const ang = (i / N) * Math.PI * 2 - Math.PI / 2;
-      const w = document.createElement('div');
-      w.className = 'shape-wedge';
-      w.dataset.shape = shape;
-      w.dataset.idx = i;
-      w.textContent = SHAPE_ICON[shape];
-      w.style.left = (Math.cos(ang) * r) + 'px';
-      w.style.top  = (Math.sin(ang) * r) + 'px';
-      shapeWheel.appendChild(w);
-    });
-  }
-  function showShapeWheel(cx, cy) {
-    buildShapeWheel();
-    shapeWheel.style.left = cx + 'px';
-    shapeWheel.style.top  = cy + 'px';
-    shapeWheel.classList.add('show');
-  }
-  function hideShapeWheel() {
-    shapeWheel.classList.remove('show');
-    shapeWheel.querySelectorAll('.shape-wedge').forEach(w => w.classList.remove('active'));
-  }
-  function highlightShapeWheel(idx) {
-    shapeWheel.querySelectorAll('.shape-wedge').forEach((w, i) => {
-      w.classList.toggle('active', i === idx);
-    });
-  }
-  function shapeIndexFromDelta(dx, dy) {
-    const dist = Math.hypot(dx, dy);
-    if (dist < 26) return -1; // dead-zone in the middle
-    const N = SHAPE_WHEEL_ORDER.length;
-    let ang = Math.atan2(dy, dx) + Math.PI / 2;
-    if (ang < 0) ang += Math.PI * 2;
-    return Math.round((ang / (Math.PI * 2)) * N) % N;
-  }
-
-  function startShapeWheel(e) {
-    const startScreen = { x: e.clientX, y: e.clientY };
-    const startWorld  = toWorld(e.clientX, e.clientY);
-    showShapeWheel(startScreen.x, startScreen.y);
-
-    let chosenIdx = -1;
-    let node = null;
-
-    function ensureNode(shape) {
-      if (node && node.shape === shape) return;
-      if (node) { node.el.remove(); nodes.delete(node.id); state.selected.delete(node); }
-      node = createShapeNode(startWorld.x, startWorld.y, 2, 2, shape);
-    }
-    function updateNodeBox(ev) {
-      if (!node) return;
+  function startShapeDrag(e, shape) {
+    shape = shape || 'rect';
+    const startWorld = toWorld(e.clientX, e.clientY);
+    const node = createShapeNode(startWorld.x, startWorld.y, 2, 2, shape);
+    bindDrag((ev) => {
       const ew = toWorld(ev.clientX, ev.clientY);
       const dx = ew.x - startWorld.x;
       const dy = ew.y - startWorld.y;
       const x = dx >= 0 ? startWorld.x : startWorld.x + dx;
       const y = dy >= 0 ? startWorld.y : startWorld.y + dy;
-      const w = Math.max(2, Math.abs(dx));
-      const h = Math.max(2, Math.abs(dy));
-      setShapeBox(node, x, y, w, h);
-    }
-
-    bindDrag((ev) => {
-      const dx = ev.clientX - startScreen.x;
-      const dy = ev.clientY - startScreen.y;
-      const idx = shapeIndexFromDelta(dx, dy);
-      if (idx !== chosenIdx) {
-        chosenIdx = idx;
-        highlightShapeWheel(idx);
-        if (idx >= 0) ensureNode(SHAPE_WHEEL_ORDER[idx]);
-        else if (node) { node.el.remove(); nodes.delete(node.id); state.selected.delete(node); node = null; }
-      }
-      if (node) updateNodeBox(ev);
+      setShapeBox(node, x, y, Math.max(2, Math.abs(dx)), Math.max(2, Math.abs(dy)));
     }, () => {
-      hideShapeWheel();
-      if (!node) return;
       if (node.w < 12 || node.h < 12) {
-        // too small / cancelled → drop it
         node.el.remove();
         nodes.delete(node.id);
         state.selected.delete(node);
@@ -1129,6 +1064,41 @@
         scheduleSave();
       }
     });
+  }
+
+  function startResizeDrag(node, pos, e) {
+    const startMouse = { x: e.clientX, y: e.clientY };
+    const start = { x: node.x, y: node.y, w: node.w, h: node.h };
+    bindDrag((ev) => {
+      const dx = (ev.clientX - startMouse.x) / view.scale;
+      const dy = (ev.clientY - startMouse.y) / view.scale;
+      let x = start.x, y = start.y, w = start.w, h = start.h;
+      if (pos.indexOf('e') >= 0) w = Math.max(4, start.w + dx);
+      if (pos.indexOf('w') >= 0) {
+        const nw = Math.max(4, start.w - dx);
+        x = start.x + start.w - nw;
+        w = nw;
+      }
+      if (pos.indexOf('s') >= 0) h = Math.max(4, start.h + dy);
+      if (pos.indexOf('n') >= 0) {
+        const nh = Math.max(4, start.h - dy);
+        y = start.y + start.h - nh;
+        h = nh;
+      }
+      setShapeBox(node, x, y, w, h);
+    }, () => scheduleSave());
+  }
+
+  // Swap the SVG inside an existing shape node (same bounding box, new shape).
+  function setShapeType(node, newShape) {
+    if (!node || node.type !== 'shape' || node.shape === newShape) return;
+    const oldEl = node.shapeEl;
+    const newEl = makeShapeSvg(newShape);
+    oldEl.parentNode.replaceChild(newEl, oldEl);
+    node.shapeEl = newEl;
+    node.shape = newShape;
+    applyShapeStyle(node);
+    scheduleSave();
   }
 
   /* ============================ ARROWS ============================ */
@@ -1518,14 +1488,13 @@
           e.target.closest('#ctx-menu') ||
           e.target.closest('#style-popup') ||
           e.target.closest('#lightbox') ||
-          e.target.closest('#mode-badge') ||
-          e.target.closest('#shape-wheel'));
+          e.target.closest('#mode-badge'));
     if (inUI) return;
-    // Shift + Ctrl/Cmd + drag → shape wheel (GTA-style)
+    // Shift + Ctrl/Cmd + drag → draw a rectangle interactively.
     if ((e.ctrlKey || e.metaKey) && e.shiftKey) {
       e.preventDefault();
       e.stopPropagation();
-      startShapeWheel(e);
+      startShapeDrag(e, 'rect');
       return;
     }
     // Ctrl/Cmd alone (or arrow mode) → arrow drawing
@@ -1716,6 +1685,26 @@
       d.className = 'hint'; d.textContent = text;
       ctxMenu.appendChild(d);
     }
+    function addShapeRow(onPick) {
+      const row = document.createElement('div');
+      row.style.cssText =
+        'display:flex; padding:0 12px 8px; gap:6px; flex-wrap:wrap;';
+      SHAPE_WHEEL_ORDER.forEach(shape => {
+        const btn = document.createElement('button');
+        btn.style.cssText =
+          'width:32px; height:32px; padding:0; font-size:18px;' +
+          ' border:1px solid #e0e0e0; background:#fff; border-radius:6px;' +
+          ' cursor:pointer; display:flex; align-items:center; justify-content:center;';
+        btn.textContent = SHAPE_ICON[shape];
+        btn.title = shape;
+        btn.addEventListener('click', () => {
+          hideContextMenu();
+          onPick(shape);
+        });
+        row.appendChild(btn);
+      });
+      ctxMenu.appendChild(row);
+    }
 
     if (target) {
       if (!state.selected.has(target)) selectOnly(target);
@@ -1730,6 +1719,10 @@
       } else if (target.kind === 'node' && target.type === 'checkbox') {
         addItem('Convert to Text', () => convertNodeType(target, 'text'));
         addSep();
+      } else if (target.kind === 'node' && target.type === 'shape') {
+        addHint('Change shape:');
+        addShapeRow((shape) => setShapeType(target, shape));
+        addSep();
       }
       addItem('Bring to Front (↑)', bringSelectedForward);
       addItem('Send to Back (↓)',   sendSelectedBackward);
@@ -1742,6 +1735,12 @@
       addItem('Add Checkbox Here', () => createCheckboxNode(wp.x, wp.y, 'task', false));
       addItem('Add Image…',        () => fileInput.click());
       addItem('Draw Arrow (A)',    () => setArrowMode(true));
+      addSep();
+      addHint('Add shape:');
+      addShapeRow((shape) => {
+        const w = 120, h = 100;
+        selectOnly(createShapeNode(wp.x - w/2, wp.y - h/2, w, h, shape));
+      });
       addSep();
       if (state.selected.size > 0) {
         addItem(`Bring Selected to Front (${state.selected.size}) ↑`, bringSelectedForward);
@@ -1768,7 +1767,7 @@
         try { localStorage.removeItem(STORAGE_KEY); } catch (e) {}
       }, { danger: true });
       addSep();
-      addHint('A = arrow mode · Ctrl+drag = arrow · Shift+Ctrl+drag = shape wheel · V = menu · double-click empty = add text · Alt+click = cycle stacked · Space+drag = pan');
+      addHint('A = arrow mode · Ctrl+drag = arrow · Shift+Ctrl+drag = rectangle · V = menu · double-click empty = add text · Alt+click = cycle stacked · Space+drag = pan');
     }
 
     ctxMenu.style.left = e.clientX + 'px';
