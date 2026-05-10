@@ -6,12 +6,12 @@
 <title>Mind Map</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&family=Manrope:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
   * { box-sizing: border-box; }
   html, body {
     margin: 0; height: 100%; overflow: hidden;
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    font-family: 'Plus Jakarta Sans', 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
     font-feature-settings: "kern" 1, "calt" 1, "ss01" 1;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
@@ -50,11 +50,18 @@
   }
   #mode-badge.show { display: block; }
 
-  /* Shape nodes ── absolute-positioned div with an inline SVG inside.
-     The SVG stretches to fill the div via viewBox 0 0 100 100 + non-uniform
-     preserveAspectRatio. */
+  /* Shape nodes ── absolute-positioned div. Most shapes contain an inline
+     SVG that stretches to fill the div via viewBox 0 0 100 100 +
+     preserveAspectRatio="none". Rectangles are special: they're rendered
+     directly as a styled div so the corner radius stays pixel-accurate
+     at any aspect ratio (no stretched corners). */
   .node.shape { cursor: move; }
   .node.shape > svg { display: block; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
+  .node.shape.shape-rect {
+    background: #ffffff;
+    border: 1.5px solid #18181b;
+    border-radius: 10px;
+  }
 
   /* Resize handles for shapes — visible only when the shape is selected. */
   .node.shape .resize-handle {
@@ -364,11 +371,15 @@
 
 <div id="style-popup">
   <select id="sp-font" title="Font">
-    <option value="">Sans</option>
+    <option value="">Jakarta</option>
+    <option value="'Inter', system-ui, sans-serif">Inter</option>
+    <option value="'DM Sans', system-ui, sans-serif">DM Sans</option>
+    <option value="'Space Grotesk', system-ui, sans-serif">Space Grotesk</option>
+    <option value="'Manrope', system-ui, sans-serif">Manrope</option>
+    <option value="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">Mono</option>
     <option value="Georgia, 'Times New Roman', serif">Serif</option>
-    <option value="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace">Mono</option>
-    <option value="'Comic Sans MS', 'Comic Sans', cursive">Casual</option>
     <option value="Impact, 'Arial Black', sans-serif">Display</option>
+    <option value="'Comic Sans MS', 'Comic Sans', cursive">Casual</option>
   </select>
   <input id="sp-size" type="number" min="8" max="200" step="1" value="16" title="Font size">
   <span class="sep"></span>
@@ -501,28 +512,43 @@
 
   function applyShapeStyle(node) {
     if (!node || node.type !== 'shape') return;
+    const s = node.style || {};
+    const fill   = s.fill        || SHAPE_DEFAULT.fill;
+    const stroke = s.stroke      || SHAPE_DEFAULT.stroke;
+    const sw     = s.strokeWidth || SHAPE_DEFAULT.strokeWidth;
+    if (node.shape === 'rect') {
+      // CSS-styled rectangle — pixel-accurate rounded corners.
+      node.el.style.background  = fill;
+      node.el.style.borderColor = stroke;
+      node.el.style.borderWidth = sw + 'px';
+      node.el.style.borderStyle = 'solid';
+      node.el.style.borderRadius = '10px';
+      return;
+    }
     const child = node.shapeEl;
     if (!child) return;
-    const s = node.style || {};
-    child.setAttribute('fill',         s.fill        || SHAPE_DEFAULT.fill);
-    child.setAttribute('stroke',       s.stroke      || SHAPE_DEFAULT.stroke);
-    child.setAttribute('stroke-width', s.strokeWidth || SHAPE_DEFAULT.strokeWidth);
+    child.setAttribute('fill',         fill);
+    child.setAttribute('stroke',       stroke);
+    child.setAttribute('stroke-width', sw);
   }
 
   function createShapeNode(x, y, w, h, shape, style) {
     const el = document.createElement('div');
-    el.className = 'node shape';
+    el.className = 'node shape shape-' + shape;
     el.style.left  = x + 'px';
     el.style.top   = y + 'px';
     el.style.width  = Math.max(2, w) + 'px';
     el.style.height = Math.max(2, h) + 'px';
 
-    const svg = document.createElementNS(SVG_NS, 'svg');
-    svg.setAttribute('viewBox', '0 0 100 100');
-    svg.setAttribute('preserveAspectRatio', 'none');
-    const shapeEl = makeShapeSvg(shape);
-    svg.appendChild(shapeEl);
-    el.appendChild(svg);
+    let shapeEl = null;
+    if (shape !== 'rect') {
+      const svg = document.createElementNS(SVG_NS, 'svg');
+      svg.setAttribute('viewBox', '0 0 100 100');
+      svg.setAttribute('preserveAspectRatio', 'none');
+      shapeEl = makeShapeSvg(shape);
+      svg.appendChild(shapeEl);
+      el.appendChild(svg);
+    }
     canvas.appendChild(el);
 
     const node = {
@@ -1249,14 +1275,42 @@
     }, () => scheduleSave());
   }
 
-  // Swap the SVG inside an existing shape node (same bounding box, new shape).
+  // Swap the rendering of an existing shape node (same bounding box, new shape).
+  // Handles the rect ↔ SVG transition since rect is rendered as a styled div.
   function setShapeType(node, newShape) {
     if (!node || node.type !== 'shape' || node.shape === newShape) return;
-    const oldEl = node.shapeEl;
-    const newEl = makeShapeSvg(newShape);
-    oldEl.parentNode.replaceChild(newEl, oldEl);
-    node.shapeEl = newEl;
+
+    // Remove old rendering
+    if (node.shape === 'rect') {
+      node.el.style.background = '';
+      node.el.style.borderColor = '';
+      node.el.style.borderWidth = '';
+      node.el.style.borderStyle = '';
+      node.el.style.borderRadius = '';
+    } else if (node.shapeEl) {
+      const svg = node.shapeEl.parentNode;
+      if (svg && svg.parentNode === node.el) svg.remove();
+      node.shapeEl = null;
+    }
+
+    node.el.classList.remove('shape-' + node.shape);
+    node.el.classList.add('shape-' + newShape);
     node.shape = newShape;
+
+    // Add new rendering
+    if (newShape !== 'rect') {
+      const svg = document.createElementNS(SVG_NS, 'svg');
+      svg.setAttribute('viewBox', '0 0 100 100');
+      svg.setAttribute('preserveAspectRatio', 'none');
+      const shapeEl = makeShapeSvg(newShape);
+      svg.appendChild(shapeEl);
+      // Insert before any resize handles so handles stay on top in DOM order.
+      const firstHandle = node.el.querySelector('.resize-handle');
+      if (firstHandle) node.el.insertBefore(svg, firstHandle);
+      else node.el.appendChild(svg);
+      node.shapeEl = shapeEl;
+    }
+
     applyShapeStyle(node);
     scheduleSave();
   }
