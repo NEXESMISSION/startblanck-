@@ -682,9 +682,13 @@
     switch (shape) {
       case 'rect':
         el = document.createElementNS(SVG_NS, 'rect');
-        el.setAttribute('x', '4'); el.setAttribute('y', '4');
-        el.setAttribute('width', '92'); el.setAttribute('height', '92');
-        el.setAttribute('rx', '6'); el.setAttribute('ry', '6');
+        // Fill the whole shape box. rx / ry are set dynamically per-size by
+        // _updateShapeRectRadii so corners stay a constant pixel radius
+        // regardless of how the box is stretched.
+        el.setAttribute('x', '0');
+        el.setAttribute('y', '0');
+        el.setAttribute('width', '100');
+        el.setAttribute('height', '100');
         break;
       case 'ellipse':
         el = document.createElementNS(SVG_NS, 'ellipse');
@@ -756,6 +760,7 @@
     el._mindNode = node;
     nodes.set(node.id, node);
     applyShapeStyle(node);
+    _updateShapeRectRadii(node);
 
     // Resize handles — visible only when the shape is selected (CSS).
     for (const pos of ['nw','n','ne','e','se','s','sw','w']) {
@@ -778,12 +783,27 @@
     return node;
   }
 
+  // Keep rect corners pixel-accurate at any aspect ratio. The rect lives in
+  // a 0–100 viewBox stretched non-uniformly, so a static rx in viewBox
+  // units would render as different pixel radii horizontally vs vertically.
+  // Solving rx (viewBox units) = (target_px / actual_px_dim) * 100 gives
+  // the same on-screen radius on both axes.
+  function _updateShapeRectRadii(node) {
+    if (!node || node.shape !== 'rect' || !node.shapeEl) return;
+    const targetPx = 8;
+    const w = Math.max(1, node.w || 1);
+    const h = Math.max(1, node.h || 1);
+    node.shapeEl.setAttribute('rx', Math.min(50, (targetPx / w) * 100));
+    node.shapeEl.setAttribute('ry', Math.min(50, (targetPx / h) * 100));
+  }
+
   function setShapeBox(node, x, y, w, h) {
     node.x = x; node.y = y; node.w = w; node.h = h;
     node.el.style.left  = x + 'px';
     node.el.style.top   = y + 'px';
     node.el.style.width  = w + 'px';
     node.el.style.height = h + 'px';
+    _updateShapeRectRadii(node);
   }
 
   /* ============================ MODE BADGES ============================ */
@@ -1849,6 +1869,7 @@
     node.el.classList.add('shape-' + newShape);
     node.shape = newShape;
     applyShapeStyle(node);
+    _updateShapeRectRadii(node);
     scheduleSave();
   }
 
