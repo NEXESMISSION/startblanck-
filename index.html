@@ -1,0 +1,854 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mind Map</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+
+  #canvas-wrap {
+    position: fixed; inset: 0;
+    background-color: #ffffff;
+    background-image: radial-gradient(circle, #cccccc 1.1px, transparent 1.4px);
+    background-size: 24px 24px;
+    background-position: 0 0;
+  }
+  #canvas-wrap.space-down { cursor: grab; }
+  #canvas-wrap.panning   { cursor: grabbing; }
+
+  #canvas, #arrows {
+    position: absolute; left: 0; top: 0;
+    width: 0; height: 0;
+    transform-origin: 0 0;
+    overflow: visible;
+  }
+  #arrows { pointer-events: none; }
+
+  .node { position: absolute; user-select: none; }
+
+  /* TEXT NODE — pure text, no border, no background, no auto-wrap */
+  .node.text {
+    white-space: pre;
+    padding: 2px 4px;
+    min-width: 14px;
+    min-height: 1.3em;
+    color: #1c1c1c;
+    font-size: 16px;
+    line-height: 1.35;
+    cursor: move;
+    outline: none;
+    border: none;
+    background: transparent;
+  }
+  .node.text[contenteditable="plaintext-only"],
+  .node.text[contenteditable="true"] {
+    cursor: text;
+    user-select: text;
+  }
+
+  /* IMAGE NODE */
+  .node.image { cursor: move; line-height: 0; }
+  .node.image img {
+    display: block;
+    max-width: 320px;
+    pointer-events: none;
+    user-select: none;
+    -webkit-user-drag: none;
+    border-radius: 2px;
+  }
+
+  /* CHECKBOX NODE */
+  .node.checkbox {
+    display: flex; align-items: flex-start; gap: 6px;
+    cursor: move;
+    font-size: 16px; line-height: 1.35; color: #1c1c1c;
+  }
+  .node.checkbox input[type=checkbox] {
+    margin: 3px 0 0 0; width: 16px; height: 16px;
+    cursor: pointer; flex-shrink: 0;
+  }
+  .node.checkbox span {
+    white-space: pre;
+    padding: 0 2px;
+    outline: none;
+    user-select: none;
+  }
+  .node.checkbox span[contenteditable="plaintext-only"],
+  .node.checkbox span[contenteditable="true"] {
+    cursor: text; user-select: text;
+  }
+  .node.checkbox.checked span { text-decoration: line-through; color: #888; }
+
+  .node.selected { outline: 1.5px dashed #4a90e2; outline-offset: 4px; border-radius: 3px; }
+
+  /* ARROWS */
+  .arrow .line { fill: none; stroke: #2c2c2c; stroke-width: 2; pointer-events: none; }
+  .arrow .hit  { fill: none; stroke: transparent; stroke-width: 14; pointer-events: stroke; cursor: pointer; }
+  .arrow.selected .line { stroke: #4a90e2; }
+  .waypoint {
+    fill: #ffffff; stroke: #4a90e2; stroke-width: 1.5;
+    cursor: grab; pointer-events: all;
+  }
+  .waypoint.endpoint { fill: #4a90e2; }
+
+  /* TOOLBAR */
+  #toolbar {
+    position: fixed; top: 12px; left: 12px;
+    background: rgba(255,255,255,0.96);
+    border: 1px solid #e0e0e0;
+    border-radius: 10px;
+    padding: 6px;
+    display: flex; gap: 4px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+    z-index: 100;
+  }
+  #toolbar button {
+    background: white; border: 1px solid #e0e0e0;
+    padding: 6px 10px; border-radius: 7px; cursor: pointer;
+    font-size: 13px; color: #333;
+  }
+  #toolbar button:hover { background: #f4f4f4; }
+
+  #help {
+    position: fixed; bottom: 12px; left: 12px; right: 12px;
+    color: #777; font-size: 12px;
+    background: rgba(255,255,255,0.9);
+    padding: 8px 12px; border-radius: 8px;
+    pointer-events: none;
+    border: 1px solid #ececec;
+  }
+
+  #file-input { display: none; }
+
+  /* LIGHTBOX */
+  #lightbox {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.92);
+    display: none; align-items: center; justify-content: center;
+    z-index: 1000; overflow: hidden;
+  }
+  #lightbox.show { display: flex; }
+  #lightbox img {
+    transform-origin: center center;
+    user-select: none; -webkit-user-drag: none;
+    cursor: grab; max-width: none; max-height: none;
+  }
+  #lightbox img.dragging { cursor: grabbing; }
+  #lb-close {
+    position: absolute; top: 10px; right: 16px; color: white;
+    font-size: 32px; cursor: pointer; user-select: none;
+    background: none; border: none; line-height: 1;
+  }
+  #lb-hint {
+    position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%);
+    color: #ccc; font-size: 12px; pointer-events: none;
+  }
+</style>
+</head>
+<body>
+
+<div id="canvas-wrap">
+  <div id="canvas"></div>
+  <svg id="arrows" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <marker id="arrowhead" viewBox="0 0 10 10" refX="9" refY="5"
+        markerUnits="strokeWidth" markerWidth="5" markerHeight="5" orient="auto">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="#2c2c2c"/>
+      </marker>
+    </defs>
+  </svg>
+</div>
+
+<div id="toolbar">
+  <button id="btn-text">+ Text</button>
+  <button id="btn-image">+ Image</button>
+  <button id="btn-check">+ Checkbox</button>
+  <button id="btn-reset">Reset View</button>
+  <button id="btn-clear" title="Erase everything">Clear</button>
+</div>
+
+<div id="help">
+  Drag node to move &nbsp;·&nbsp; <b>Space + drag</b> to pan &nbsp;·&nbsp; Wheel to zoom
+  &nbsp;·&nbsp; <b>Ctrl + drag</b> to draw arrow (drag dots to bend, double-click line to add a waypoint, double-click waypoint to remove)
+  &nbsp;·&nbsp; Double-click text/checkbox-label to edit &nbsp;·&nbsp; Double-click image to zoom
+  &nbsp;·&nbsp; Drag-drop image files / URLs anywhere &nbsp;·&nbsp; <b>Delete</b> removes selected
+</div>
+
+<input id="file-input" type="file" accept="image/*">
+
+<div id="lightbox">
+  <button id="lb-close" title="Close (Esc)">&times;</button>
+  <img id="lb-img" alt="">
+  <div id="lb-hint">Wheel = zoom &nbsp; · &nbsp; Drag = pan &nbsp; · &nbsp; Esc = close</div>
+</div>
+
+<script>
+(function () {
+  const wrap       = document.getElementById('canvas-wrap');
+  const canvas     = document.getElementById('canvas');
+  const arrowsSvg  = document.getElementById('arrows');
+  const fileInput  = document.getElementById('file-input');
+  const lb         = document.getElementById('lightbox');
+  const lbImg      = document.getElementById('lb-img');
+  const lbClose    = document.getElementById('lb-close');
+
+  const SVG_NS = 'http://www.w3.org/2000/svg';
+
+  /* ---------- view ---------- */
+  const view = { x: 0, y: 0, scale: 1 };
+  const nodes  = new Map();
+  const arrows = new Map();
+  let nextId = 1;
+  const newId = () => 'n' + (nextId++);
+
+  const state = {
+    spaceDown: false,
+    selectedNode: null,
+    selectedArrow: null,
+  };
+
+  /* ---------- persistence (localStorage) ---------- */
+  const STORAGE_KEY = 'mindmap.v1';
+  let _suppressSave = false;
+  let _saveTimer = null;
+  function scheduleSave() {
+    if (_suppressSave) return;
+    if (_saveTimer) return;
+    _saveTimer = setTimeout(() => { _saveTimer = null; saveNow(); }, 250);
+  }
+  function saveNow() {
+    if (_suppressSave) return;
+    const data = {
+      view: { x: view.x, y: view.y, scale: view.scale },
+      nodes: [...nodes.values()].map(n => {
+        if (n.type === 'text')
+          return { type: 'text', x: n.x, y: n.y, text: n.el.textContent };
+        if (n.type === 'image')
+          return { type: 'image', x: n.x, y: n.y, src: n.src };
+        if (n.type === 'checkbox')
+          return { type: 'checkbox', x: n.x, y: n.y,
+                   text: n.span.textContent, checked: !!n.cb.checked };
+      }).filter(Boolean),
+      arrows: [...arrows.values()].map(a => ({
+        points: a.points.map(p => ({ x: +p.x, y: +p.y })),
+      })),
+    };
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); }
+    catch (e) { console.warn('mindmap save failed', e); }
+  }
+  function loadNow() {
+    let raw;
+    try { raw = localStorage.getItem(STORAGE_KEY); }
+    catch (e) { return; }
+    if (!raw) return;
+    let data;
+    try { data = JSON.parse(raw); } catch (e) { return; }
+    _suppressSave = true;
+    try {
+      if (data.view) {
+        view.x = +data.view.x || 0;
+        view.y = +data.view.y || 0;
+        view.scale = +data.view.scale || 1;
+        applyTransform();
+      }
+      if (Array.isArray(data.nodes)) {
+        for (const n of data.nodes) {
+          if (n.type === 'text')
+            createTextNode(+n.x || 0, +n.y || 0, n.text || '', false);
+          else if (n.type === 'image' && n.src)
+            createImageNode(+n.x || 0, +n.y || 0, n.src);
+          else if (n.type === 'checkbox')
+            createCheckboxNode(+n.x || 0, +n.y || 0, n.text || '', !!n.checked);
+        }
+      }
+      if (Array.isArray(data.arrows)) {
+        for (const a of data.arrows) {
+          if (a.points && a.points.length >= 2) {
+            createArrow(a.points.map(p => ({ x: +p.x, y: +p.y })));
+          }
+        }
+      }
+    } finally {
+      _suppressSave = false;
+    }
+  }
+
+  function applyTransform() {
+    const t = `translate(${view.x}px, ${view.y}px) scale(${view.scale})`;
+    canvas.style.transform = t;
+    arrowsSvg.style.transform = t;
+    wrap.style.backgroundPosition = `${view.x}px ${view.y}px`;
+    wrap.style.backgroundSize = `${24 * view.scale}px ${24 * view.scale}px`;
+  }
+  applyTransform();
+
+  function toWorld(sx, sy) {
+    return { x: (sx - view.x) / view.scale, y: (sy - view.y) / view.scale };
+  }
+
+  function isEditing() {
+    const ae = document.activeElement;
+    return !!(ae && ae.isContentEditable);
+  }
+
+  /* ---------- selection ---------- */
+  function selectOnly(item) {
+    if (state.selectedNode && state.selectedNode !== item) {
+      state.selectedNode.el.classList.remove('selected');
+      state.selectedNode = null;
+    }
+    if (state.selectedArrow && state.selectedArrow !== item) {
+      state.selectedArrow.el.classList.remove('selected');
+      state.selectedArrow = null;
+    }
+    if (!item) return;
+    if (item.kind === 'arrow') {
+      state.selectedArrow = item;
+    } else {
+      state.selectedNode = item;
+    }
+    item.el.classList.add('selected');
+  }
+
+  /* ---------- editable helper ---------- */
+  function makeEditable(el, onCommit) {
+    if (el.getAttribute('contenteditable') === 'plaintext-only' ||
+        el.getAttribute('contenteditable') === 'true') return;
+    // Try plaintext-only (Chromium/Firefox 87+/Safari). Fallback handled below.
+    try { el.contentEditable = 'plaintext-only'; }
+    catch (e) { el.contentEditable = 'true'; }
+    el.focus();
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+
+    function kd(e) {
+      if (e.key === 'Escape') { e.preventDefault(); el.blur(); }
+      // If browser doesn't honour plaintext-only, force \n on Enter
+      if (el.contentEditable !== 'plaintext-only' && e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        document.execCommand && document.execCommand('insertText', false, '\n');
+      }
+    }
+    function blur() {
+      el.removeEventListener('blur', blur);
+      el.removeEventListener('keydown', kd);
+      el.contentEditable = 'false';
+      if (onCommit) onCommit();
+    }
+    el.addEventListener('blur', blur);
+    el.addEventListener('keydown', kd);
+  }
+
+  /* ============================================================
+                              NODES
+     ============================================================ */
+
+  function setNodePos(node, x, y) {
+    node.x = x; node.y = y;
+    node.el.style.left = x + 'px';
+    node.el.style.top  = y + 'px';
+  }
+
+  function attachNodeDrag(node) {
+    node.el.addEventListener('mousedown', (e) => {
+      if (e.button !== 0) return;
+      if (state.spaceDown) return;            // space-pan beats node-drag
+      if (e.ctrlKey || e.metaKey) {           // Ctrl-drag from a node = arrow
+        e.preventDefault(); e.stopPropagation();
+        startArrowFromMouse(e);
+        return;
+      }
+      // If we're inside the active editor, let the click position the caret
+      if (isEditing() && (node.el.contains(document.activeElement) ||
+                          node.el === document.activeElement)) return;
+
+      e.stopPropagation();
+      selectOnly(node);
+
+      const startMouse = { x: e.clientX, y: e.clientY };
+      const startPos   = { x: node.x, y: node.y };
+      function mv(ev) {
+        const dx = (ev.clientX - startMouse.x) / view.scale;
+        const dy = (ev.clientY - startMouse.y) / view.scale;
+        setNodePos(node, startPos.x + dx, startPos.y + dy);
+      }
+      function up() {
+        document.removeEventListener('mousemove', mv);
+        document.removeEventListener('mouseup', up);
+        scheduleSave();
+      }
+      document.addEventListener('mousemove', mv);
+      document.addEventListener('mouseup', up);
+    });
+  }
+
+  function deleteNode(node) {
+    node.el.remove();
+    nodes.delete(node.id);
+    if (state.selectedNode === node) state.selectedNode = null;
+    scheduleSave();
+  }
+
+  function createTextNode(x, y, text, autoEdit) {
+    const el = document.createElement('div');
+    el.className = 'node text';
+    el.textContent = text == null ? '' : text;
+    canvas.appendChild(el);
+    const node = { id: newId(), kind: 'node', type: 'text', el, x: 0, y: 0 };
+    setNodePos(node, x, y);
+    nodes.set(node.id, node);
+    attachNodeDrag(node);
+
+    el.addEventListener('dblclick', (e) => {
+      e.stopPropagation();
+      makeEditable(el, () => {
+        if (el.textContent.replace(/\s+/g, '') === '') deleteNode(node);
+        else scheduleSave();
+      });
+    });
+
+    if (autoEdit) {
+      requestAnimationFrame(() => makeEditable(el, () => {
+        if (el.textContent.replace(/\s+/g, '') === '') deleteNode(node);
+        else scheduleSave();
+      }));
+    }
+    scheduleSave();
+    return node;
+  }
+
+  function createImageNode(x, y, src) {
+    const el = document.createElement('div');
+    el.className = 'node image';
+    const img = document.createElement('img');
+    img.src = src;
+    img.draggable = false;
+    el.appendChild(img);
+    canvas.appendChild(el);
+
+    const node = { id: newId(), kind: 'node', type: 'image', el, x: 0, y: 0, src, img };
+    setNodePos(node, x, y);
+    nodes.set(node.id, node);
+    attachNodeDrag(node);
+
+    el.addEventListener('dblclick', (e) => {
+      e.stopPropagation();
+      openLightbox(src);
+    });
+    scheduleSave();
+    return node;
+  }
+
+  function createCheckboxNode(x, y, text, checked) {
+    const el = document.createElement('div');
+    el.className = 'node checkbox' + (checked ? ' checked' : '');
+
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = !!checked;
+    // Don't let the checkbox initiate a drag
+    cb.addEventListener('mousedown', (e) => e.stopPropagation());
+    cb.addEventListener('click', () => {
+      el.classList.toggle('checked', cb.checked);
+      scheduleSave();
+    });
+
+    const span = document.createElement('span');
+    span.textContent = text == null ? '' : text;
+
+    el.appendChild(cb);
+    el.appendChild(span);
+    canvas.appendChild(el);
+
+    const node = { id: newId(), kind: 'node', type: 'checkbox', el, x: 0, y: 0, span, cb };
+    setNodePos(node, x, y);
+    nodes.set(node.id, node);
+    attachNodeDrag(node);
+
+    span.addEventListener('dblclick', (e) => {
+      e.stopPropagation();
+      makeEditable(span, scheduleSave);
+    });
+    scheduleSave();
+    return node;
+  }
+
+  /* ============================================================
+                              ARROWS
+     ============================================================ */
+
+  function createArrow(points) {
+    const g = document.createElementNS(SVG_NS, 'g');
+    g.setAttribute('class', 'arrow');
+    arrowsSvg.appendChild(g);
+    const arrow = { id: newId(), kind: 'arrow', el: g, points };
+    arrows.set(arrow.id, arrow);
+    renderArrow(arrow);
+    return arrow;
+  }
+
+  function deleteArrow(arrow) {
+    arrow.el.remove();
+    arrows.delete(arrow.id);
+    if (state.selectedArrow === arrow) state.selectedArrow = null;
+    scheduleSave();
+  }
+
+  function pointToSegmentDist(p, a, b) {
+    const dx = b.x - a.x, dy = b.y - a.y;
+    const len2 = dx * dx + dy * dy;
+    if (len2 === 0) return Math.hypot(p.x - a.x, p.y - a.y);
+    let t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2;
+    t = Math.max(0, Math.min(1, t));
+    return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy));
+  }
+
+  function renderArrow(arrow) {
+    const pts = arrow.points;
+    while (arrow.el.firstChild) arrow.el.removeChild(arrow.el.firstChild);
+    if (pts.length < 2) return;
+
+    const d = pts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ');
+
+    // Wide invisible hit path for selecting / adding waypoints
+    const hit = document.createElementNS(SVG_NS, 'path');
+    hit.setAttribute('class', 'hit');
+    hit.setAttribute('d', d);
+    hit.addEventListener('mousedown', (e) => {
+      e.stopPropagation();
+      selectOnly(arrow);
+    });
+    hit.addEventListener('dblclick', (e) => {
+      e.stopPropagation();
+      const w = toWorld(e.clientX, e.clientY);
+      let bestIdx = 1, bestDist = Infinity;
+      for (let i = 0; i < pts.length - 1; i++) {
+        const d2 = pointToSegmentDist(w, pts[i], pts[i + 1]);
+        if (d2 < bestDist) { bestDist = d2; bestIdx = i + 1; }
+      }
+      pts.splice(bestIdx, 0, w);
+      renderArrow(arrow);
+      scheduleSave();
+    });
+    arrow.el.appendChild(hit);
+
+    // Visible polyline with arrowhead
+    const line = document.createElementNS(SVG_NS, 'path');
+    line.setAttribute('class', 'line');
+    line.setAttribute('d', d);
+    line.setAttribute('marker-end', 'url(#arrowhead)');
+    arrow.el.appendChild(line);
+
+    // Waypoint handles
+    pts.forEach((p, i) => {
+      const c = document.createElementNS(SVG_NS, 'circle');
+      const isEnd = (i === 0 || i === pts.length - 1);
+      c.setAttribute('class', 'waypoint' + (isEnd ? ' endpoint' : ''));
+      c.setAttribute('cx', p.x);
+      c.setAttribute('cy', p.y);
+      c.setAttribute('r', isEnd ? 5 : 4);
+      c.addEventListener('mousedown', (e) => {
+        if (e.button !== 0) return;
+        e.preventDefault(); e.stopPropagation();
+        selectOnly(arrow);
+        const startMouse = { x: e.clientX, y: e.clientY };
+        const startP = { x: pts[i].x, y: pts[i].y };
+        function mv(ev) {
+          const dx = (ev.clientX - startMouse.x) / view.scale;
+          const dy = (ev.clientY - startMouse.y) / view.scale;
+          pts[i] = { x: startP.x + dx, y: startP.y + dy };
+          renderArrow(arrow);
+        }
+        function up() {
+          document.removeEventListener('mousemove', mv);
+          document.removeEventListener('mouseup', up);
+          scheduleSave();
+        }
+        document.addEventListener('mousemove', mv);
+        document.addEventListener('mouseup', up);
+      });
+      c.addEventListener('dblclick', (e) => {
+        // Remove a middle waypoint (keep endpoints)
+        if (i > 0 && i < pts.length - 1) {
+          e.stopPropagation();
+          pts.splice(i, 1);
+          renderArrow(arrow);
+          scheduleSave();
+        }
+      });
+      arrow.el.appendChild(c);
+    });
+  }
+
+  function startArrowFromMouse(e) {
+    const start = toWorld(e.clientX, e.clientY);
+    const points = [{ x: start.x, y: start.y }, { x: start.x, y: start.y }];
+    const arrow = createArrow(points);
+
+    function mv(ev) {
+      const w = toWorld(ev.clientX, ev.clientY);
+      points[points.length - 1] = w;
+      renderArrow(arrow);
+    }
+    function up() {
+      document.removeEventListener('mousemove', mv);
+      document.removeEventListener('mouseup', up);
+      const s  = points[0];
+      const e2 = points[points.length - 1];
+      if (Math.hypot(e2.x - s.x, e2.y - s.y) < 6 / view.scale) {
+        // tiny — abort
+        deleteArrow(arrow);
+        return;
+      }
+      // Insert two intermediate waypoints so the arrow is bendy by default
+      const wp1 = { x: s.x + (e2.x - s.x) / 3,     y: s.y + (e2.y - s.y) / 3     };
+      const wp2 = { x: s.x + 2 * (e2.x - s.x) / 3, y: s.y + 2 * (e2.y - s.y) / 3 };
+      arrow.points = [s, wp1, wp2, e2];
+      renderArrow(arrow);
+      selectOnly(arrow);
+      scheduleSave();
+    }
+    document.addEventListener('mousemove', mv);
+    document.addEventListener('mouseup', up);
+  }
+
+  /* ============================================================
+                          PAN / ZOOM / EMPTY
+     ============================================================ */
+
+  wrap.addEventListener('mousedown', (e) => {
+    if (e.button !== 0) return;
+    if (e.ctrlKey || e.metaKey) {
+      e.preventDefault();
+      startArrowFromMouse(e);
+      return;
+    }
+    if (state.spaceDown) {
+      e.preventDefault();
+      wrap.classList.add('panning');
+      const startMouse = { x: e.clientX, y: e.clientY };
+      const startView  = { x: view.x, y: view.y };
+      function mv(ev) {
+        view.x = startView.x + (ev.clientX - startMouse.x);
+        view.y = startView.y + (ev.clientY - startMouse.y);
+        applyTransform();
+      }
+      function up() {
+        wrap.classList.remove('panning');
+        document.removeEventListener('mousemove', mv);
+        document.removeEventListener('mouseup', up);
+        scheduleSave();
+      }
+      document.addEventListener('mousemove', mv);
+      document.addEventListener('mouseup', up);
+      return;
+    }
+    selectOnly(null);
+  });
+
+  wrap.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const delta = -e.deltaY * 0.0015;
+    const oldScale = view.scale;
+    const newScale = Math.max(0.15, Math.min(5, oldScale * Math.exp(delta)));
+    const rect = wrap.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+    const wx = (mx - view.x) / oldScale;
+    const wy = (my - view.y) / oldScale;
+    view.scale = newScale;
+    view.x = mx - wx * newScale;
+    view.y = my - wy * newScale;
+    applyTransform();
+    scheduleSave();
+  }, { passive: false });
+
+  /* ============================================================
+                            KEYBOARD
+     ============================================================ */
+
+  window.addEventListener('keydown', (e) => {
+    if (e.code === 'Space' && !isEditing()) {
+      if (!state.spaceDown) {
+        state.spaceDown = true;
+        wrap.classList.add('space-down');
+      }
+      e.preventDefault();
+    } else if (e.key === 'Delete' && !isEditing()) {
+      if (state.selectedNode)  deleteNode(state.selectedNode);
+      if (state.selectedArrow) deleteArrow(state.selectedArrow);
+    } else if (e.key === 'Escape') {
+      if (lb.classList.contains('show')) closeLightbox();
+      else selectOnly(null);
+    }
+  });
+
+  window.addEventListener('keyup', (e) => {
+    if (e.code === 'Space') {
+      state.spaceDown = false;
+      wrap.classList.remove('space-down');
+    }
+  });
+
+  // If the window loses focus while space is held, release it cleanly
+  window.addEventListener('blur', () => {
+    state.spaceDown = false;
+    wrap.classList.remove('space-down');
+  });
+
+  /* ============================================================
+                          DRAG-AND-DROP IMAGES
+     ============================================================ */
+
+  wrap.addEventListener('dragover', (e) => { e.preventDefault(); });
+  wrap.addEventListener('drop', (e) => {
+    e.preventDefault();
+    const w = toWorld(e.clientX, e.clientY);
+    const dt = e.dataTransfer;
+    if (!dt) return;
+
+    // Files
+    if (dt.files && dt.files.length > 0) {
+      let i = 0;
+      for (const f of dt.files) {
+        if (!f.type.startsWith('image/')) continue;
+        const reader = new FileReader();
+        const off = i++ * 16;
+        reader.onload = (ev) => createImageNode(w.x + off, w.y + off, ev.target.result);
+        reader.readAsDataURL(f);
+      }
+      if (i > 0) return;
+    }
+    // HTML drag from another page (often <img src=...>)
+    const html = dt.getData('text/html');
+    if (html) {
+      const m = html.match(/<img[^>]+src=["']([^"']+)["']/i);
+      if (m) { createImageNode(w.x, w.y, m[1]); return; }
+    }
+    // Plain URL / URI list
+    const url = (dt.getData('text/uri-list') || dt.getData('text/plain') || '')
+                  .split('\n')[0].trim();
+    if (url && /^(https?:|data:|blob:)/i.test(url)) {
+      createImageNode(w.x, w.y, url);
+    }
+  });
+
+  /* ============================================================
+                              LIGHTBOX
+     ============================================================ */
+
+  let lbState = { scale: 1, x: 0, y: 0 };
+
+  function applyLb() {
+    lbImg.style.transform =
+      `translate(${lbState.x}px, ${lbState.y}px) scale(${lbState.scale})`;
+  }
+  function openLightbox(src) {
+    lbImg.src = src;
+    lbState = { scale: 1, x: 0, y: 0 };
+    applyLb();
+    lb.classList.add('show');
+  }
+  function closeLightbox() { lb.classList.remove('show'); }
+
+  lbClose.addEventListener('click', closeLightbox);
+  lb.addEventListener('click', (e) => { if (e.target === lb) closeLightbox(); });
+
+  lb.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const old = lbState.scale;
+    const ns  = Math.max(0.1, Math.min(10, old * Math.exp(-e.deltaY * 0.0015)));
+    // zoom around mouse, relative to current image center
+    const rect = lbImg.getBoundingClientRect();
+    const cx = rect.left + rect.width / 2;
+    const cy = rect.top  + rect.height / 2;
+    const mx = e.clientX - cx;
+    const my = e.clientY - cy;
+    const f = ns / old;
+    lbState.x = (lbState.x - mx) * f + mx;
+    lbState.y = (lbState.y - my) * f + my;
+    lbState.scale = ns;
+    applyLb();
+  }, { passive: false });
+
+  lbImg.addEventListener('mousedown', (e) => {
+    e.preventDefault(); e.stopPropagation();
+    const start = { x: e.clientX, y: e.clientY };
+    const sp = { x: lbState.x, y: lbState.y };
+    lbImg.classList.add('dragging');
+    function mv(ev) {
+      lbState.x = sp.x + (ev.clientX - start.x);
+      lbState.y = sp.y + (ev.clientY - start.y);
+      applyLb();
+    }
+    function up() {
+      lbImg.classList.remove('dragging');
+      document.removeEventListener('mousemove', mv);
+      document.removeEventListener('mouseup', up);
+    }
+    document.addEventListener('mousemove', mv);
+    document.addEventListener('mouseup', up);
+  });
+
+  /* ============================================================
+                              TOOLBAR
+     ============================================================ */
+
+  function viewCenterWorld() {
+    const r = wrap.getBoundingClientRect();
+    return toWorld(r.left + r.width / 2, r.top + r.height / 2);
+  }
+
+  document.getElementById('btn-text').addEventListener('click', () => {
+    const w = viewCenterWorld();
+    createTextNode(w.x, w.y, '', true);
+  });
+  document.getElementById('btn-image').addEventListener('click', () => {
+    fileInput.click();
+  });
+  fileInput.addEventListener('change', (e) => {
+    const f = e.target.files[0];
+    if (!f) return;
+    const w = viewCenterWorld();
+    const reader = new FileReader();
+    reader.onload = (ev) => createImageNode(w.x, w.y, ev.target.result);
+    reader.readAsDataURL(f);
+    fileInput.value = '';
+  });
+  document.getElementById('btn-check').addEventListener('click', () => {
+    const w = viewCenterWorld();
+    createCheckboxNode(w.x, w.y, 'task', false);
+  });
+  document.getElementById('btn-reset').addEventListener('click', () => {
+    view.x = 0; view.y = 0; view.scale = 1;
+    applyTransform();
+    scheduleSave();
+  });
+  document.getElementById('btn-clear').addEventListener('click', () => {
+    if (!confirm('Erase the entire mind map? This cannot be undone.')) return;
+    _suppressSave = true;
+    [...nodes.values()].forEach(n => n.el.remove());
+    nodes.clear();
+    [...arrows.values()].forEach(a => a.el.remove());
+    arrows.clear();
+    state.selectedNode = null;
+    state.selectedArrow = null;
+    view.x = 0; view.y = 0; view.scale = 1;
+    applyTransform();
+    _suppressSave = false;
+    try { localStorage.removeItem(STORAGE_KEY); } catch (e) {}
+  });
+
+  // Restore previous session
+  loadNow();
+  // Save once on tab close (covers edits made during in-flight debounce)
+  window.addEventListener('beforeunload', saveNow);
+})();
+</script>
+</body>
+</html>
