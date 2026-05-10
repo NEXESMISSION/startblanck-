@@ -7,14 +7,12 @@
 <style>
   * { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; overflow: hidden;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    user-select: none; -webkit-user-select: none; }
 
   #canvas-wrap {
     position: fixed; inset: 0;
-    background-color: #ffffff;
-    background-image: radial-gradient(circle, #cccccc 1.1px, transparent 1.4px);
-    background-size: 24px 24px;
-    background-position: 0 0;
+    background: #ffffff;
   }
   #canvas-wrap.space-down { cursor: grab; }
   #canvas-wrap.panning   { cursor: grabbing; }
@@ -29,7 +27,7 @@
 
   .node { position: absolute; user-select: none; }
 
-  /* TEXT NODE — pure text, no border, no background, no auto-wrap */
+  /* TEXT — pure text, no border, no background, no auto-wrap */
   .node.text {
     white-space: pre;
     padding: 2px 4px;
@@ -49,7 +47,6 @@
     user-select: text;
   }
 
-  /* IMAGE NODE */
   .node.image { cursor: move; line-height: 0; }
   .node.image img {
     display: block;
@@ -60,7 +57,6 @@
     border-radius: 2px;
   }
 
-  /* CHECKBOX NODE */
   .node.checkbox {
     display: flex; align-items: flex-start; gap: 6px;
     cursor: move;
@@ -84,7 +80,6 @@
 
   .node.selected { outline: 1.5px dashed #4a90e2; outline-offset: 4px; border-radius: 3px; }
 
-  /* ARROWS */
   .arrow .line { fill: none; stroke: #2c2c2c; stroke-width: 2; pointer-events: none; }
   .arrow .hit  { fill: none; stroke: transparent; stroke-width: 14; pointer-events: stroke; cursor: pointer; }
   .arrow.selected .line { stroke: #4a90e2; }
@@ -93,24 +88,6 @@
     cursor: grab; pointer-events: all;
   }
   .waypoint.endpoint { fill: #4a90e2; }
-
-  /* TOOLBAR */
-  #toolbar {
-    position: fixed; top: 12px; left: 12px;
-    background: rgba(255,255,255,0.96);
-    border: 1px solid #e0e0e0;
-    border-radius: 10px;
-    padding: 6px;
-    display: flex; gap: 4px;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.06);
-    z-index: 100;
-  }
-  #toolbar button {
-    background: white; border: 1px solid #e0e0e0;
-    padding: 6px 10px; border-radius: 7px; cursor: pointer;
-    font-size: 13px; color: #333;
-  }
-  #toolbar button:hover { background: #f4f4f4; }
 
   #help {
     position: fixed; bottom: 12px; left: 12px; right: 12px;
@@ -122,6 +99,38 @@
   }
 
   #file-input { display: none; }
+
+  #marquee {
+    position: fixed; pointer-events: none;
+    border: 1.5px solid #4a90e2;
+    background: rgba(74,144,226,0.10);
+    z-index: 50;
+  }
+
+  /* RIGHT-CLICK MENU */
+  #ctx-menu {
+    position: fixed; z-index: 200;
+    background: #ffffff;
+    border: 1px solid #d8d8d8;
+    border-radius: 8px;
+    padding: 4px 0;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.12);
+    min-width: 180px;
+    font-size: 13px;
+    user-select: none;
+    display: none;
+  }
+  #ctx-menu.show { display: block; }
+  #ctx-menu button {
+    display: block; width: 100%; text-align: left;
+    background: none; border: none; padding: 7px 14px;
+    cursor: pointer; color: #232323;
+    font: inherit;
+  }
+  #ctx-menu button:hover { background: #f1f5fb; }
+  #ctx-menu button.danger { color: #c33; }
+  #ctx-menu button.danger:hover { background: #fdecec; }
+  #ctx-menu hr { margin: 4px 0; border: none; border-top: 1px solid #eee; }
 
   /* LIGHTBOX */
   #lightbox {
@@ -161,19 +170,13 @@
   </svg>
 </div>
 
-<div id="toolbar">
-  <button id="btn-text">+ Text</button>
-  <button id="btn-image">+ Image</button>
-  <button id="btn-check">+ Checkbox</button>
-  <button id="btn-reset">Reset View</button>
-  <button id="btn-clear" title="Erase everything">Clear</button>
-</div>
+<div id="ctx-menu"></div>
 
 <div id="help">
-  Drag node to move &nbsp;·&nbsp; <b>Space + drag</b> to pan &nbsp;·&nbsp; Wheel to zoom
-  &nbsp;·&nbsp; <b>Ctrl + drag</b> to draw arrow (drag dots to bend, double-click line to add a waypoint, double-click waypoint to remove)
-  &nbsp;·&nbsp; Double-click text/checkbox-label to edit &nbsp;·&nbsp; Double-click image to zoom
-  &nbsp;·&nbsp; Drag-drop image files / URLs anywhere &nbsp;·&nbsp; <b>Delete</b> removes selected
+  <b>Right-click</b> for menu &nbsp;·&nbsp; Drag empty area to box-select &nbsp;·&nbsp;
+  Drag node to move &nbsp;·&nbsp; <b>Space + drag</b> = pan &nbsp;·&nbsp; Wheel = zoom &nbsp;·&nbsp;
+  <b>Ctrl + drag</b> = arrow &nbsp;·&nbsp; <b>Shift + click / Shift + drag</b> = multi-select &nbsp;·&nbsp;
+  <b>↑ / ↓</b> = layer up / down &nbsp;·&nbsp; <b>Delete</b> = remove
 </div>
 
 <input id="file-input" type="file" accept="image/*">
@@ -193,10 +196,11 @@
   const lb         = document.getElementById('lightbox');
   const lbImg      = document.getElementById('lb-img');
   const lbClose    = document.getElementById('lb-close');
+  const ctxMenu    = document.getElementById('ctx-menu');
 
   const SVG_NS = 'http://www.w3.org/2000/svg';
 
-  /* ---------- view ---------- */
+  /* ---------- view & data ---------- */
   const view = { x: 0, y: 0, scale: 1 };
   const nodes  = new Map();
   const arrows = new Map();
@@ -205,11 +209,29 @@
 
   const state = {
     spaceDown: false,
-    selectedNode: null,
-    selectedArrow: null,
+    selected: new Set(),     // contains nodes AND arrows
   };
 
-  /* ---------- persistence (localStorage) ---------- */
+  function applyTransform() {
+    const t = `translate(${view.x}px, ${view.y}px) scale(${view.scale})`;
+    canvas.style.transform = t;
+    arrowsSvg.style.transform = t;
+  }
+  applyTransform();
+
+  function toWorld(sx, sy) {
+    return { x: (sx - view.x) / view.scale, y: (sy - view.y) / view.scale };
+  }
+  function toScreen(wx, wy) {
+    return { x: wx * view.scale + view.x, y: wy * view.scale + view.y };
+  }
+  function isEditing() {
+    const ae = document.activeElement;
+    return !!(ae && ae.isContentEditable);
+  }
+
+  /* ============================ PERSISTENCE ============================ */
+
   const STORAGE_KEY = 'mindmap.v1';
   let _suppressSave = false;
   let _saveTimer = null;
@@ -220,20 +242,28 @@
   }
   function saveNow() {
     if (_suppressSave) return;
+    const ns = [];
+    for (const el of canvas.children) {
+      const n = el._mindNode;
+      if (!n) continue;
+      if (n.type === 'text')
+        ns.push({ type: 'text', x: n.x, y: n.y, text: n.el.textContent });
+      else if (n.type === 'image')
+        ns.push({ type: 'image', x: n.x, y: n.y, src: n.src });
+      else if (n.type === 'checkbox')
+        ns.push({ type: 'checkbox', x: n.x, y: n.y,
+                  text: n.span.textContent, checked: !!n.cb.checked });
+    }
+    const ar = [];
+    for (const el of arrowsSvg.children) {
+      const a = el._mindArrow;
+      if (!a) continue;
+      ar.push({ points: a.points.map(p => ({ x: +p.x, y: +p.y })) });
+    }
     const data = {
       view: { x: view.x, y: view.y, scale: view.scale },
-      nodes: [...nodes.values()].map(n => {
-        if (n.type === 'text')
-          return { type: 'text', x: n.x, y: n.y, text: n.el.textContent };
-        if (n.type === 'image')
-          return { type: 'image', x: n.x, y: n.y, src: n.src };
-        if (n.type === 'checkbox')
-          return { type: 'checkbox', x: n.x, y: n.y,
-                   text: n.span.textContent, checked: !!n.cb.checked };
-      }).filter(Boolean),
-      arrows: [...arrows.values()].map(a => ({
-        points: a.points.map(p => ({ x: +p.x, y: +p.y })),
-      })),
+      nodes: ns,
+      arrows: ar,
     };
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); }
     catch (e) { console.warn('mindmap save failed', e); }
@@ -275,48 +305,37 @@
     }
   }
 
-  function applyTransform() {
-    const t = `translate(${view.x}px, ${view.y}px) scale(${view.scale})`;
-    canvas.style.transform = t;
-    arrowsSvg.style.transform = t;
-    wrap.style.backgroundPosition = `${view.x}px ${view.y}px`;
-    wrap.style.backgroundSize = `${24 * view.scale}px ${24 * view.scale}px`;
-  }
-  applyTransform();
+  /* ============================ SELECTION ============================ */
 
-  function toWorld(sx, sy) {
-    return { x: (sx - view.x) / view.scale, y: (sy - view.y) / view.scale };
+  function clearSelection() {
+    for (const it of state.selected) it.el.classList.remove('selected');
+    state.selected.clear();
   }
-
-  function isEditing() {
-    const ae = document.activeElement;
-    return !!(ae && ae.isContentEditable);
-  }
-
-  /* ---------- selection ---------- */
-  function selectOnly(item) {
-    if (state.selectedNode && state.selectedNode !== item) {
-      state.selectedNode.el.classList.remove('selected');
-      state.selectedNode = null;
-    }
-    if (state.selectedArrow && state.selectedArrow !== item) {
-      state.selectedArrow.el.classList.remove('selected');
-      state.selectedArrow = null;
-    }
+  function addToSelection(item) {
     if (!item) return;
-    if (item.kind === 'arrow') {
-      state.selectedArrow = item;
-    } else {
-      state.selectedNode = item;
-    }
+    state.selected.add(item);
     item.el.classList.add('selected');
   }
+  function selectOnly(item) {
+    clearSelection();
+    addToSelection(item);
+  }
+  function toggleSelect(item) {
+    if (state.selected.has(item)) {
+      state.selected.delete(item);
+      item.el.classList.remove('selected');
+    } else {
+      addToSelection(item);
+    }
+  }
+  function getSelectedNodes()  { return [...state.selected].filter(it => it.kind === 'node'); }
+  function getSelectedArrows() { return [...state.selected].filter(it => it.kind === 'arrow'); }
 
-  /* ---------- editable helper ---------- */
+  /* ============================ EDIT HELPER ============================ */
+
   function makeEditable(el, onCommit) {
     if (el.getAttribute('contenteditable') === 'plaintext-only' ||
         el.getAttribute('contenteditable') === 'true') return;
-    // Try plaintext-only (Chromium/Firefox 87+/Safari). Fallback handled below.
     try { el.contentEditable = 'plaintext-only'; }
     catch (e) { el.contentEditable = 'true'; }
     el.focus();
@@ -325,10 +344,8 @@
     const sel = window.getSelection();
     sel.removeAllRanges();
     sel.addRange(range);
-
     function kd(e) {
       if (e.key === 'Escape') { e.preventDefault(); el.blur(); }
-      // If browser doesn't honour plaintext-only, force \n on Enter
       if (el.contentEditable !== 'plaintext-only' && e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
         document.execCommand && document.execCommand('insertText', false, '\n');
@@ -344,9 +361,7 @@
     el.addEventListener('keydown', kd);
   }
 
-  /* ============================================================
-                              NODES
-     ============================================================ */
+  /* ============================ NODES ============================ */
 
   function setNodePos(node, x, y) {
     node.x = x; node.y = y;
@@ -357,25 +372,43 @@
   function attachNodeDrag(node) {
     node.el.addEventListener('mousedown', (e) => {
       if (e.button !== 0) return;
-      if (state.spaceDown) return;            // space-pan beats node-drag
-      if (e.ctrlKey || e.metaKey) {           // Ctrl-drag from a node = arrow
+      if (state.spaceDown) return;
+      if (e.ctrlKey || e.metaKey) {
         e.preventDefault(); e.stopPropagation();
         startArrowFromMouse(e);
         return;
       }
-      // If we're inside the active editor, let the click position the caret
+      // If we're inside the active editor, let the click position the caret —
+      // but stop the event so it doesn't bubble to wrap and start a marquee.
       if (isEditing() && (node.el.contains(document.activeElement) ||
-                          node.el === document.activeElement)) return;
-
+                          node.el === document.activeElement)) {
+        e.stopPropagation();
+        return;
+      }
       e.stopPropagation();
-      selectOnly(node);
+      hideContextMenu();
 
+      // Selection logic
+      if (e.shiftKey) {
+        toggleSelect(node);
+        if (!state.selected.has(node)) return; // toggled off — no drag
+      } else if (!state.selected.has(node)) {
+        selectOnly(node);
+      }
+
+      // Drag every currently selected node together
+      const draggable = getSelectedNodes();
       const startMouse = { x: e.clientX, y: e.clientY };
-      const startPos   = { x: node.x, y: node.y };
+      const startPositions = new Map();
+      for (const n of draggable) startPositions.set(n, { x: n.x, y: n.y });
+
       function mv(ev) {
         const dx = (ev.clientX - startMouse.x) / view.scale;
         const dy = (ev.clientY - startMouse.y) / view.scale;
-        setNodePos(node, startPos.x + dx, startPos.y + dy);
+        for (const n of draggable) {
+          const sp = startPositions.get(n);
+          setNodePos(n, sp.x + dx, sp.y + dy);
+        }
       }
       function up() {
         document.removeEventListener('mousemove', mv);
@@ -390,7 +423,7 @@
   function deleteNode(node) {
     node.el.remove();
     nodes.delete(node.id);
-    if (state.selectedNode === node) state.selectedNode = null;
+    state.selected.delete(node);
     scheduleSave();
   }
 
@@ -400,10 +433,10 @@
     el.textContent = text == null ? '' : text;
     canvas.appendChild(el);
     const node = { id: newId(), kind: 'node', type: 'text', el, x: 0, y: 0 };
+    el._mindNode = node;
     setNodePos(node, x, y);
     nodes.set(node.id, node);
     attachNodeDrag(node);
-
     el.addEventListener('dblclick', (e) => {
       e.stopPropagation();
       makeEditable(el, () => {
@@ -411,7 +444,6 @@
         else scheduleSave();
       });
     });
-
     if (autoEdit) {
       requestAnimationFrame(() => makeEditable(el, () => {
         if (el.textContent.replace(/\s+/g, '') === '') deleteNode(node);
@@ -430,12 +462,11 @@
     img.draggable = false;
     el.appendChild(img);
     canvas.appendChild(el);
-
     const node = { id: newId(), kind: 'node', type: 'image', el, x: 0, y: 0, src, img };
+    el._mindNode = node;
     setNodePos(node, x, y);
     nodes.set(node.id, node);
     attachNodeDrag(node);
-
     el.addEventListener('dblclick', (e) => {
       e.stopPropagation();
       openLightbox(src);
@@ -447,29 +478,24 @@
   function createCheckboxNode(x, y, text, checked) {
     const el = document.createElement('div');
     el.className = 'node checkbox' + (checked ? ' checked' : '');
-
     const cb = document.createElement('input');
     cb.type = 'checkbox';
     cb.checked = !!checked;
-    // Don't let the checkbox initiate a drag
     cb.addEventListener('mousedown', (e) => e.stopPropagation());
     cb.addEventListener('click', () => {
       el.classList.toggle('checked', cb.checked);
       scheduleSave();
     });
-
     const span = document.createElement('span');
     span.textContent = text == null ? '' : text;
-
     el.appendChild(cb);
     el.appendChild(span);
     canvas.appendChild(el);
-
     const node = { id: newId(), kind: 'node', type: 'checkbox', el, x: 0, y: 0, span, cb };
+    el._mindNode = node;
     setNodePos(node, x, y);
     nodes.set(node.id, node);
     attachNodeDrag(node);
-
     span.addEventListener('dblclick', (e) => {
       e.stopPropagation();
       makeEditable(span, scheduleSave);
@@ -478,15 +504,14 @@
     return node;
   }
 
-  /* ============================================================
-                              ARROWS
-     ============================================================ */
+  /* ============================ ARROWS ============================ */
 
   function createArrow(points) {
     const g = document.createElementNS(SVG_NS, 'g');
     g.setAttribute('class', 'arrow');
     arrowsSvg.appendChild(g);
     const arrow = { id: newId(), kind: 'arrow', el: g, points };
+    g._mindArrow = arrow;
     arrows.set(arrow.id, arrow);
     renderArrow(arrow);
     return arrow;
@@ -495,7 +520,7 @@
   function deleteArrow(arrow) {
     arrow.el.remove();
     arrows.delete(arrow.id);
-    if (state.selectedArrow === arrow) state.selectedArrow = null;
+    state.selected.delete(arrow);
     scheduleSave();
   }
 
@@ -512,16 +537,17 @@
     const pts = arrow.points;
     while (arrow.el.firstChild) arrow.el.removeChild(arrow.el.firstChild);
     if (pts.length < 2) return;
-
     const d = pts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ');
 
-    // Wide invisible hit path for selecting / adding waypoints
     const hit = document.createElementNS(SVG_NS, 'path');
     hit.setAttribute('class', 'hit');
     hit.setAttribute('d', d);
     hit.addEventListener('mousedown', (e) => {
+      if (e.button !== 0) return;
       e.stopPropagation();
-      selectOnly(arrow);
+      hideContextMenu();
+      if (e.shiftKey) toggleSelect(arrow);
+      else if (!state.selected.has(arrow)) selectOnly(arrow);
     });
     hit.addEventListener('dblclick', (e) => {
       e.stopPropagation();
@@ -537,14 +563,12 @@
     });
     arrow.el.appendChild(hit);
 
-    // Visible polyline with arrowhead
     const line = document.createElementNS(SVG_NS, 'path');
     line.setAttribute('class', 'line');
     line.setAttribute('d', d);
     line.setAttribute('marker-end', 'url(#arrowhead)');
     arrow.el.appendChild(line);
 
-    // Waypoint handles
     pts.forEach((p, i) => {
       const c = document.createElementNS(SVG_NS, 'circle');
       const isEnd = (i === 0 || i === pts.length - 1);
@@ -555,7 +579,7 @@
       c.addEventListener('mousedown', (e) => {
         if (e.button !== 0) return;
         e.preventDefault(); e.stopPropagation();
-        selectOnly(arrow);
+        if (!state.selected.has(arrow)) selectOnly(arrow);
         const startMouse = { x: e.clientX, y: e.clientY };
         const startP = { x: pts[i].x, y: pts[i].y };
         function mv(ev) {
@@ -573,7 +597,6 @@
         document.addEventListener('mouseup', up);
       });
       c.addEventListener('dblclick', (e) => {
-        // Remove a middle waypoint (keep endpoints)
         if (i > 0 && i < pts.length - 1) {
           e.stopPropagation();
           pts.splice(i, 1);
@@ -586,6 +609,7 @@
   }
 
   function startArrowFromMouse(e) {
+    hideContextMenu();
     const start = toWorld(e.clientX, e.clientY);
     const points = [{ x: start.x, y: start.y }, { x: start.x, y: start.y }];
     const arrow = createArrow(points);
@@ -601,11 +625,9 @@
       const s  = points[0];
       const e2 = points[points.length - 1];
       if (Math.hypot(e2.x - s.x, e2.y - s.y) < 6 / view.scale) {
-        // tiny — abort
         deleteArrow(arrow);
         return;
       }
-      // Insert two intermediate waypoints so the arrow is bendy by default
       const wp1 = { x: s.x + (e2.x - s.x) / 3,     y: s.y + (e2.y - s.y) / 3     };
       const wp2 = { x: s.x + 2 * (e2.x - s.x) / 3, y: s.y + 2 * (e2.y - s.y) / 3 };
       arrow.points = [s, wp1, wp2, e2];
@@ -617,12 +639,70 @@
     document.addEventListener('mouseup', up);
   }
 
-  /* ============================================================
-                          PAN / ZOOM / EMPTY
-     ============================================================ */
+  /* ============================ MARQUEE / BOX-SELECT ============================ */
+
+  function rectsOverlap(a, b) {
+    return a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+  }
+  function pointInRect(x, y, r) {
+    return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+  }
+
+  function startMarquee(e) {
+    const startX = e.clientX, startY = e.clientY;
+    const additive = e.shiftKey;
+    const initial = new Set(state.selected);
+    let didMove = false;
+    let box = null;
+
+    function update(ev) {
+      const x = Math.min(startX, ev.clientX);
+      const y = Math.min(startY, ev.clientY);
+      const w = Math.abs(ev.clientX - startX);
+      const h = Math.abs(ev.clientY - startY);
+      if (!didMove && (w + h) > 3) {
+        didMove = true;
+        box = document.createElement('div');
+        box.id = 'marquee';
+        document.body.appendChild(box);
+      }
+      if (!didMove) return;
+      box.style.left = x + 'px';
+      box.style.top  = y + 'px';
+      box.style.width  = w + 'px';
+      box.style.height = h + 'px';
+
+      const mr = { left: x, top: y, right: x + w, bottom: y + h };
+      const inside = new Set();
+      for (const n of nodes.values()) {
+        const br = n.el.getBoundingClientRect();
+        if (rectsOverlap(mr, br)) inside.add(n);
+      }
+      for (const a of arrows.values()) {
+        for (const p of a.points) {
+          const sp = toScreen(p.x, p.y);
+          if (pointInRect(sp.x, sp.y, mr)) { inside.add(a); break; }
+        }
+      }
+      clearSelection();
+      if (additive) for (const it of initial) addToSelection(it);
+      for (const it of inside) addToSelection(it);
+    }
+    function up() {
+      document.removeEventListener('mousemove', update);
+      document.removeEventListener('mouseup', up);
+      if (box) box.remove();
+      if (!didMove && !additive) clearSelection();
+    }
+    document.addEventListener('mousemove', update);
+    document.addEventListener('mouseup', up);
+  }
+
+  /* ============================ PAN / ZOOM / EMPTY-DRAG ============================ */
 
   wrap.addEventListener('mousedown', (e) => {
     if (e.button !== 0) return;
+    hideContextMenu();
     if (e.ctrlKey || e.metaKey) {
       e.preventDefault();
       startArrowFromMouse(e);
@@ -648,7 +728,8 @@
       document.addEventListener('mouseup', up);
       return;
     }
-    selectOnly(null);
+    // Empty area → marquee box-select (or simple deselect on a no-move click)
+    startMarquee(e);
   });
 
   wrap.addEventListener('wheel', (e) => {
@@ -668,9 +749,37 @@
     scheduleSave();
   }, { passive: false });
 
-  /* ============================================================
-                            KEYBOARD
-     ============================================================ */
+  /* ============================ KEYBOARD / LAYERING ============================ */
+
+  function bringSelectedForward() {
+    const ns = getSelectedNodes();
+    const as = getSelectedArrows();
+    for (const n of ns) canvas.appendChild(n.el);
+    for (const a of as) arrowsSvg.appendChild(a.el);
+    if (ns.length || as.length) { scheduleSave(); return true; }
+    return false;
+  }
+  function sendSelectedBackward() {
+    const ns = getSelectedNodes();
+    const as = getSelectedArrows();
+    for (let i = ns.length - 1; i >= 0; i--) {
+      const first = canvas.firstChild;
+      if (first && first !== ns[i].el) canvas.insertBefore(ns[i].el, first);
+    }
+    for (const a of as) {
+      const defs = arrowsSvg.querySelector('defs');
+      const ref = defs ? defs.nextSibling : arrowsSvg.firstChild;
+      if (ref && a.el !== ref) arrowsSvg.insertBefore(a.el, ref);
+    }
+    if (ns.length || as.length) { scheduleSave(); return true; }
+    return false;
+  }
+  function deleteSelected() {
+    for (const it of [...state.selected]) {
+      if (it.kind === 'node') deleteNode(it);
+      else if (it.kind === 'arrow') deleteArrow(it);
+    }
+  }
 
   window.addEventListener('keydown', (e) => {
     if (e.code === 'Space' && !isEditing()) {
@@ -680,30 +789,39 @@
       }
       e.preventDefault();
     } else if (e.key === 'Delete' && !isEditing()) {
-      if (state.selectedNode)  deleteNode(state.selectedNode);
-      if (state.selectedArrow) deleteArrow(state.selectedArrow);
+      deleteSelected();
+    } else if (e.key === 'ArrowUp' && !isEditing()) {
+      if (bringSelectedForward()) e.preventDefault();
+    } else if (e.key === 'ArrowDown' && !isEditing()) {
+      if (sendSelectedBackward()) e.preventDefault();
     } else if (e.key === 'Escape') {
       if (lb.classList.contains('show')) closeLightbox();
-      else selectOnly(null);
+      else if (ctxMenu.classList.contains('show')) hideContextMenu();
+      else clearSelection();
+    } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a' && !isEditing()) {
+      e.preventDefault();
+      clearSelection();
+      for (const n of nodes.values())  addToSelection(n);
+      for (const a of arrows.values()) addToSelection(a);
     }
   });
-
   window.addEventListener('keyup', (e) => {
     if (e.code === 'Space') {
       state.spaceDown = false;
       wrap.classList.remove('space-down');
     }
   });
-
-  // If the window loses focus while space is held, release it cleanly
   window.addEventListener('blur', () => {
     state.spaceDown = false;
     wrap.classList.remove('space-down');
   });
 
-  /* ============================================================
-                          DRAG-AND-DROP IMAGES
-     ============================================================ */
+  // Block native HTML5 drag and stray text-selection while we manage events.
+  // (The usual reason Ctrl+drag silently fails on Windows Chrome.)
+  wrap.addEventListener('dragstart',   (e) => e.preventDefault());
+  wrap.addEventListener('selectstart', (e) => { if (!isEditing()) e.preventDefault(); });
+
+  /* ============================ DRAG-DROP IMAGES ============================ */
 
   wrap.addEventListener('dragover', (e) => { e.preventDefault(); });
   wrap.addEventListener('drop', (e) => {
@@ -711,8 +829,6 @@
     const w = toWorld(e.clientX, e.clientY);
     const dt = e.dataTransfer;
     if (!dt) return;
-
-    // Files
     if (dt.files && dt.files.length > 0) {
       let i = 0;
       for (const f of dt.files) {
@@ -724,13 +840,11 @@
       }
       if (i > 0) return;
     }
-    // HTML drag from another page (often <img src=...>)
     const html = dt.getData('text/html');
     if (html) {
       const m = html.match(/<img[^>]+src=["']([^"']+)["']/i);
       if (m) { createImageNode(w.x, w.y, m[1]); return; }
     }
-    // Plain URL / URI list
     const url = (dt.getData('text/uri-list') || dt.getData('text/plain') || '')
                   .split('\n')[0].trim();
     if (url && /^(https?:|data:|blob:)/i.test(url)) {
@@ -738,12 +852,9 @@
     }
   });
 
-  /* ============================================================
-                              LIGHTBOX
-     ============================================================ */
+  /* ============================ LIGHTBOX ============================ */
 
   let lbState = { scale: 1, x: 0, y: 0 };
-
   function applyLb() {
     lbImg.style.transform =
       `translate(${lbState.x}px, ${lbState.y}px) scale(${lbState.scale})`;
@@ -755,15 +866,12 @@
     lb.classList.add('show');
   }
   function closeLightbox() { lb.classList.remove('show'); }
-
   lbClose.addEventListener('click', closeLightbox);
   lb.addEventListener('click', (e) => { if (e.target === lb) closeLightbox(); });
-
   lb.addEventListener('wheel', (e) => {
     e.preventDefault();
     const old = lbState.scale;
     const ns  = Math.max(0.1, Math.min(10, old * Math.exp(-e.deltaY * 0.0015)));
-    // zoom around mouse, relative to current image center
     const rect = lbImg.getBoundingClientRect();
     const cx = rect.left + rect.width / 2;
     const cy = rect.top  + rect.height / 2;
@@ -775,7 +883,6 @@
     lbState.scale = ns;
     applyLb();
   }, { passive: false });
-
   lbImg.addEventListener('mousedown', (e) => {
     e.preventDefault(); e.stopPropagation();
     const start = { x: e.clientX, y: e.clientY };
@@ -795,58 +902,123 @@
     document.addEventListener('mouseup', up);
   });
 
-  /* ============================================================
-                              TOOLBAR
-     ============================================================ */
+  /* ============================ RIGHT-CLICK CONTEXT MENU ============================ */
 
-  function viewCenterWorld() {
-    const r = wrap.getBoundingClientRect();
-    return toWorld(r.left + r.width / 2, r.top + r.height / 2);
+  let _ctxWorldPos = null;
+
+  function findItemFromTarget(el) {
+    let n = el;
+    while (n && n !== document.body) {
+      if (n._mindNode)  return n._mindNode;
+      if (n._mindArrow) return n._mindArrow;
+      n = n.parentElement || n.parentNode;
+    }
+    return null;
   }
 
-  document.getElementById('btn-text').addEventListener('click', () => {
-    const w = viewCenterWorld();
-    createTextNode(w.x, w.y, '', true);
+  function showContextMenu(e, target) {
+    ctxMenu.innerHTML = '';
+    _ctxWorldPos = toWorld(e.clientX, e.clientY);
+
+    function addItem(label, action, opts) {
+      const b = document.createElement('button');
+      b.textContent = label;
+      if (opts && opts.danger) b.className = 'danger';
+      b.addEventListener('click', () => { hideContextMenu(); action(); });
+      ctxMenu.appendChild(b);
+    }
+    function addSep() { ctxMenu.appendChild(document.createElement('hr')); }
+
+    if (target) {
+      // Right-click on a node/arrow: ensure it's part of the selection.
+      if (!state.selected.has(target)) selectOnly(target);
+
+      if (target.kind === 'node' && target.type === 'image') {
+        addItem('Open / Zoom Image', () => openLightbox(target.src));
+        addSep();
+      }
+      addItem('Bring to Front (↑)', bringSelectedForward);
+      addItem('Send to Back (↓)',   sendSelectedBackward);
+      addSep();
+      addItem(state.selected.size > 1 ? `Delete ${state.selected.size} items` : 'Delete',
+              deleteSelected, { danger: true });
+    } else {
+      const wp = _ctxWorldPos;
+      addItem('Add Text Here',     () => createTextNode(wp.x, wp.y, '', true));
+      addItem('Add Checkbox Here', () => createCheckboxNode(wp.x, wp.y, 'task', false));
+      addItem('Add Image…',        () => fileInput.click());
+      addSep();
+      if (state.selected.size > 0) {
+        addItem(`Bring Selected to Front (${state.selected.size}) ↑`, bringSelectedForward);
+        addItem(`Send Selected to Back (${state.selected.size}) ↓`,   sendSelectedBackward);
+        addItem(`Delete Selected (${state.selected.size})`,           deleteSelected, { danger: true });
+        addSep();
+      }
+      addItem('Reset View', () => {
+        view.x = 0; view.y = 0; view.scale = 1;
+        applyTransform(); scheduleSave();
+      });
+      addItem('Clear Everything', () => {
+        if (!confirm('Erase the entire mind map? This cannot be undone.')) return;
+        _suppressSave = true;
+        for (const n of [...nodes.values()]) n.el.remove();
+        nodes.clear();
+        for (const a of [...arrows.values()]) a.el.remove();
+        arrows.clear();
+        state.selected.clear();
+        view.x = 0; view.y = 0; view.scale = 1;
+        applyTransform();
+        _suppressSave = false;
+        try { localStorage.removeItem(STORAGE_KEY); } catch (e) {}
+      }, { danger: true });
+    }
+
+    ctxMenu.style.left = e.clientX + 'px';
+    ctxMenu.style.top  = e.clientY + 'px';
+    ctxMenu.classList.add('show');
+    const r = ctxMenu.getBoundingClientRect();
+    if (r.right  > window.innerWidth)  ctxMenu.style.left = (window.innerWidth  - r.width  - 6) + 'px';
+    if (r.bottom > window.innerHeight) ctxMenu.style.top  = (window.innerHeight - r.height - 6) + 'px';
+  }
+
+  function hideContextMenu() {
+    ctxMenu.classList.remove('show');
+    ctxMenu.innerHTML = '';
+  }
+
+  document.addEventListener('contextmenu', (e) => {
+    if (e.target.closest && (e.target.closest('#lightbox') || e.target.closest('#ctx-menu'))) return;
+    if (isEditing()) return; // let the browser show its native menu while editing
+    e.preventDefault();
+    const target = findItemFromTarget(e.target);
+    showContextMenu(e, target);
   });
-  document.getElementById('btn-image').addEventListener('click', () => {
-    fileInput.click();
-  });
+
+  // Click anywhere outside the menu closes it (capture-phase so we hide before re-opening).
+  document.addEventListener('mousedown', (e) => {
+    if (!ctxMenu.classList.contains('show')) return;
+    if (e.target.closest && e.target.closest('#ctx-menu')) return;
+    hideContextMenu();
+  }, true);
+
+  /* ============================ FILE INPUT ============================ */
+
   fileInput.addEventListener('change', (e) => {
     const f = e.target.files[0];
     if (!f) return;
-    const w = viewCenterWorld();
+    const w = _ctxWorldPos || (() => {
+      const r = wrap.getBoundingClientRect();
+      return toWorld(r.left + r.width / 2, r.top + r.height / 2);
+    })();
     const reader = new FileReader();
     reader.onload = (ev) => createImageNode(w.x, w.y, ev.target.result);
     reader.readAsDataURL(f);
     fileInput.value = '';
   });
-  document.getElementById('btn-check').addEventListener('click', () => {
-    const w = viewCenterWorld();
-    createCheckboxNode(w.x, w.y, 'task', false);
-  });
-  document.getElementById('btn-reset').addEventListener('click', () => {
-    view.x = 0; view.y = 0; view.scale = 1;
-    applyTransform();
-    scheduleSave();
-  });
-  document.getElementById('btn-clear').addEventListener('click', () => {
-    if (!confirm('Erase the entire mind map? This cannot be undone.')) return;
-    _suppressSave = true;
-    [...nodes.values()].forEach(n => n.el.remove());
-    nodes.clear();
-    [...arrows.values()].forEach(a => a.el.remove());
-    arrows.clear();
-    state.selectedNode = null;
-    state.selectedArrow = null;
-    view.x = 0; view.y = 0; view.scale = 1;
-    applyTransform();
-    _suppressSave = false;
-    try { localStorage.removeItem(STORAGE_KEY); } catch (e) {}
-  });
 
-  // Restore previous session
+  /* ============================ INIT ============================ */
+
   loadNow();
-  // Save once on tab close (covers edits made during in-flight debounce)
   window.addEventListener('beforeunload', saveNow);
 })();
 </script>
