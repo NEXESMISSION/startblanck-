@@ -188,6 +188,27 @@
     border-radius: 6px;
   }
 
+  /* Bookmark node — small dark circle with a number, jumpable via Alt+digit. */
+  .node.bookmark {
+    width: 36px; height: 36px;
+    background: #18181b;
+    color: #fafafa;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 600;
+    font-size: 14px;
+    letter-spacing: -0.01em;
+    cursor: move;
+    user-select: none;
+    box-shadow: 0 6px 16px rgba(0,0,0,0.18), 0 0 0 4px rgba(24,24,27,0.04);
+    transition: transform 0.14s ease, box-shadow 0.14s ease;
+  }
+  .node.bookmark:hover {
+    transform: scale(1.05);
+    box-shadow: 0 8px 22px rgba(0,0,0,0.22), 0 0 0 4px rgba(24,24,27,0.06);
+  }
+  .node.bookmark .bookmark-number { pointer-events: none; }
+
   /* Lock toggle — visible when the node is selected or locked. Locked nodes
      ignore drag, select, marquee and dblclick; only the lock button itself
      responds, so the user can unlock. */
@@ -752,6 +773,7 @@
       else if (n.type === 'image')    ns.push({ ...base, src: n.src });
       else if (n.type === 'checkbox') ns.push({ ...base, text: n.span.textContent, checked: !!n.cb.checked });
       else if (n.type === 'shape')    ns.push({ ...base, shape: n.shape, w: n.w, h: n.h });
+      else if (n.type === 'bookmark') ns.push({ ...base, number: +n.number || 0 });
     }
     const ar = [];
     for (const el of arrowsLayer.children) {
@@ -804,6 +826,7 @@
           else if (n.type === 'image' && n.src) node = createImageNode(+n.x || 0, +n.y || 0, n.src);
           else if (n.type === 'checkbox')    node = createCheckboxNode(+n.x || 0, +n.y || 0, n.text || '', !!n.checked);
           else if (n.type === 'shape')      node = createShapeNode(+n.x || 0, +n.y || 0, +n.w || 60, +n.h || 60, n.shape || 'rect', n.style);
+          else if (n.type === 'bookmark')   node = createBookmarkNode(+n.x || 0, +n.y || 0, +n.number || 0);
           if (node && n.style) {
             node.style = n.style;
             if (node.type === 'shape') applyShapeStyle(node);
@@ -1143,6 +1166,76 @@
     // quick tab close right after dropping an image still persists it.
     saveNow();
     return node;
+  }
+
+  function nextBookmarkNumber() {
+    let max = 0;
+    for (const n of nodes.values()) {
+      if (n.type === 'bookmark' && +n.number > max) max = +n.number;
+    }
+    return max + 1;
+  }
+
+  function createBookmarkNode(x, y, number) {
+    const el = document.createElement('div');
+    el.className = 'node bookmark';
+    const span = document.createElement('span');
+    span.className = 'bookmark-number';
+    span.textContent = String(number);
+    el.appendChild(span);
+    canvas.appendChild(el);
+    const node = {
+      id: newId(), kind: 'node', type: 'bookmark', el,
+      x, y, number: +number || 0, span,
+      style: {},
+    };
+    el._mindNode = node;
+    setNodePos(node, x, y);
+    nodes.set(node.id, node);
+    attachNodeDrag(node);
+    el.addEventListener('dblclick', (e) => {
+      if (node.locked) return;
+      e.stopPropagation();
+      const raw = prompt('Bookmark number (Alt + digit jumps to it):',
+                         String(node.number));
+      if (raw == null) return;
+      const num = parseInt(raw, 10);
+      if (isNaN(num) || num < 0) return;
+      node.number = num;
+      span.textContent = String(num);
+      scheduleSave();
+    });
+    el.appendChild(makeLockButton(node));
+    scheduleSave();
+    return node;
+  }
+
+  // Animate the view so a node sits at the centre of the canvas viewport.
+  let _viewAnimRaf = null;
+  function centerOnNode(node) {
+    if (!node || !node.el) return;
+    const w = node.el.offsetWidth  || 0;
+    const h = node.el.offsetHeight || 0;
+    const cx = node.x + w / 2;
+    const cy = node.y + h / 2;
+    const r  = wrap.getBoundingClientRect();
+    const tx = r.width  / 2 - cx * view.scale;
+    const ty = r.height / 2 - cy * view.scale;
+    if (_viewAnimRaf) cancelAnimationFrame(_viewAnimRaf);
+    const fromX = view.x, fromY = view.y;
+    const start = performance.now();
+    const dur   = 320;
+    function step(t) {
+      const k = Math.min(1, (t - start) / dur);
+      const e = 1 - Math.pow(1 - k, 3);
+      view.x = fromX + (tx - fromX) * e;
+      view.y = fromY + (ty - fromY) * e;
+      applyTransform();
+      repositionStylePopup();
+      if (k < 1) _viewAnimRaf = requestAnimationFrame(step);
+      else { _viewAnimRaf = null; scheduleSave(); }
+    }
+    _viewAnimRaf = requestAnimationFrame(step);
   }
 
   function createCheckboxNode(x, y, text, checked) {
@@ -1706,7 +1799,78 @@
     for (const it of [...state.selected]) {
       if (it.kind === 'node') deleteNode(it);
       else if (it.kind === 'arrow') deleteArrow(it);
+      else if (it.kind === 'redline') deleteRedline(it);
     }
+  }
+
+  /* ============================ ALIGN / DISTRIBUTE ============================
+     Operate on the selected node-kind items (text, image, checkbox, shape).
+     align: snap an edge or centre across all selected to a single value.
+     distribute: lay them out along an axis with a fixed pixel gap.            */
+
+  function _selectedAlignableNodes() {
+    return [...state.selected].filter(it => it.kind === 'node' && !it.locked);
+  }
+
+  function alignSelected(mode) {
+    const items = _selectedAlignableNodes();
+    if (items.length < 2) return;
+    const dims = items.map(n => ({
+      n,
+      w: n.el.offsetWidth  || n.w || 0,
+      h: n.el.offsetHeight || n.h || 0,
+    }));
+    if (mode === 'left') {
+      const t = Math.min(...items.map(n => n.x));
+      for (const n of items) setNodePos(n, t, n.y);
+    } else if (mode === 'right') {
+      const t = Math.max(...dims.map(d => d.n.x + d.w));
+      for (const d of dims) setNodePos(d.n, t - d.w, d.n.y);
+    } else if (mode === 'cx') {
+      const cs = dims.map(d => d.n.x + d.w / 2);
+      const t  = (Math.min(...cs) + Math.max(...cs)) / 2;
+      for (const d of dims) setNodePos(d.n, t - d.w / 2, d.n.y);
+    } else if (mode === 'top') {
+      const t = Math.min(...items.map(n => n.y));
+      for (const n of items) setNodePos(n, n.x, t);
+    } else if (mode === 'bottom') {
+      const t = Math.max(...dims.map(d => d.n.y + d.h));
+      for (const d of dims) setNodePos(d.n, d.n.x, t - d.h);
+    } else if (mode === 'cy') {
+      const cs = dims.map(d => d.n.y + d.h / 2);
+      const t  = (Math.min(...cs) + Math.max(...cs)) / 2;
+      for (const d of dims) setNodePos(d.n, d.n.x, t - d.h / 2);
+    }
+    scheduleSave();
+  }
+
+  function distributeSelected(axis) {
+    const items = _selectedAlignableNodes();
+    if (items.length < 2) return;
+    const raw = prompt('Spacing in pixels between items:', '24');
+    if (raw == null) return;
+    const gap = Math.max(0, parseFloat(raw) || 0);
+    const dims = items.map(n => ({
+      n,
+      w: n.el.offsetWidth  || n.w || 0,
+      h: n.el.offsetHeight || n.h || 0,
+    }));
+    if (axis === 'h') {
+      dims.sort((a, b) => a.n.x - b.n.x);
+      let cursor = dims[0].n.x;
+      for (const d of dims) {
+        setNodePos(d.n, cursor, d.n.y);
+        cursor += d.w + gap;
+      }
+    } else {
+      dims.sort((a, b) => a.n.y - b.n.y);
+      let cursor = dims[0].n.y;
+      for (const d of dims) {
+        setNodePos(d.n, d.n.x, cursor);
+        cursor += d.h + gap;
+      }
+    }
+    scheduleSave();
   }
 
   function setCtrlIndicator(on) {
@@ -1766,6 +1930,19 @@
       e.preventDefault();
       deleteSelected();
       return;
+    }
+    // Alt + digit → centre the view on the bookmark with that number.
+    if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey
+        && /^[0-9]$/.test(e.key)
+        && !isEditing() && !isFormFocused()) {
+      const num = parseInt(e.key, 10);
+      for (const n of nodes.values()) {
+        if (n.type === 'bookmark' && +n.number === num) {
+          e.preventDefault();
+          centerOnNode(n);
+          return;
+        }
+      }
     }
   });
   window.addEventListener('keyup', (e) => {
@@ -2045,6 +2222,17 @@
         addShapeRow((shape) => setShapeType(target, shape));
         addSep();
       }
+      if (state.selected.size >= 2) {
+        addItem('Align Left',     () => alignSelected('left'));
+        addItem('Align Centre',   () => alignSelected('cx'));
+        addItem('Align Right',    () => alignSelected('right'));
+        addItem('Align Top',      () => alignSelected('top'));
+        addItem('Align Middle',   () => alignSelected('cy'));
+        addItem('Align Bottom',   () => alignSelected('bottom'));
+        addItem('Distribute Horizontally…', () => distributeSelected('h'));
+        addItem('Distribute Vertically…',   () => distributeSelected('v'));
+        addSep();
+      }
       addItem('Bring to Front (↑)', bringSelectedForward);
       addItem('Send to Back (↓)',   sendSelectedBackward);
       if (target.kind === 'node') {
@@ -2060,6 +2248,10 @@
       addItem('Add Checkbox Here', () => createCheckboxNode(wp.x, wp.y, 'task', false));
       addItem('Add Image…',        () => fileInput.click());
       addItem('Draw Arrow (A)',    () => setArrowMode(true));
+      addItem('Add Bookmark Here (Alt+digit jumps)', () => {
+        const num = nextBookmarkNumber();
+        selectOnly(createBookmarkNode(wp.x - 18, wp.y - 18, num));
+      });
       addSep();
       addHint('Add shape:');
       addShapeRow((shape) => {
