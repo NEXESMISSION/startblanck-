@@ -35,6 +35,51 @@
   }
   #mode-badge.show { display: block; }
 
+  /* Shape nodes ── absolute-positioned div with an inline SVG inside.
+     The SVG stretches to fill the div via viewBox 0 0 100 100 + non-uniform
+     preserveAspectRatio. */
+  .node.shape { cursor: move; }
+  .node.shape > svg { display: block; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
+
+  /* Shape wheel — appears at Shift+Ctrl+mousedown. Wedges are absolutely
+     positioned around the (0,0) origin of the wheel container, which is
+     placed at the cursor. */
+  #shape-wheel {
+    position: fixed;
+    pointer-events: none;
+    z-index: 220;
+    display: none;
+    width: 0; height: 0;
+  }
+  #shape-wheel.show { display: block; }
+  .shape-wedge {
+    position: absolute;
+    width: 44px; height: 44px;
+    margin-left: -22px; margin-top: -22px;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(255,255,255,0.97);
+    border: 2px solid #d8d8d8;
+    border-radius: 50%;
+    font-size: 22px;
+    color: #333;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.12);
+    transition: transform .08s, background .08s, border-color .08s, color .08s;
+    pointer-events: none;
+    user-select: none;
+  }
+  .shape-wedge.active {
+    background: #4a90e2; color: #fff; border-color: #4a90e2;
+    transform: scale(1.18);
+  }
+  .shape-wheel-hub {
+    position: absolute;
+    width: 18px; height: 18px;
+    margin-left: -9px; margin-top: -9px;
+    border-radius: 50%;
+    background: #4a90e2;
+    box-shadow: 0 0 0 4px rgba(74,144,226,0.20);
+  }
+
   #canvas {
     position: absolute; left: 0; top: 0;
     width: 0; height: 0;
@@ -244,6 +289,7 @@
 
 <div id="ctx-menu"></div>
 <div id="mode-badge"></div>
+<div id="shape-wheel"><div class="shape-wheel-hub"></div></div>
 
 <div id="style-popup">
   <select id="sp-font" title="Font">
@@ -289,6 +335,7 @@
   const lbClose    = document.getElementById('lb-close');
   const ctxMenu    = document.getElementById('ctx-menu');
   const modeBadge  = document.getElementById('mode-badge');
+  const shapeWheel = document.getElementById('shape-wheel');
   const stylePopup = document.getElementById('style-popup');
   const spFont     = document.getElementById('sp-font');
   const spSize     = document.getElementById('sp-size');
@@ -314,6 +361,103 @@
     selected: new Set(),
   };
   const _lastMouse = { x: 0, y: 0 };
+
+  /* ============================ SHAPES ============================ */
+
+  // Wheel order, clockwise from the top.
+  const SHAPE_WHEEL_ORDER = ['star', 'heart', 'rect', 'ellipse', 'triangle', 'diamond'];
+  const SHAPE_ICON = { rect:'▭', ellipse:'○', triangle:'△', diamond:'◇', star:'☆', heart:'♡' };
+  const SHAPE_DEFAULT = { fill: 'rgba(74,144,226,0.15)', stroke: '#4a90e2', strokeWidth: 2 };
+
+  function makeShapeSvg(shape) {
+    let el;
+    switch (shape) {
+      case 'rect':
+        el = document.createElementNS(SVG_NS, 'rect');
+        el.setAttribute('x', '4'); el.setAttribute('y', '4');
+        el.setAttribute('width', '92'); el.setAttribute('height', '92');
+        el.setAttribute('rx', '3'); el.setAttribute('ry', '3');
+        break;
+      case 'ellipse':
+        el = document.createElementNS(SVG_NS, 'ellipse');
+        el.setAttribute('cx', '50'); el.setAttribute('cy', '50');
+        el.setAttribute('rx', '46'); el.setAttribute('ry', '46');
+        break;
+      case 'triangle':
+        el = document.createElementNS(SVG_NS, 'polygon');
+        el.setAttribute('points', '50,5 95,93 5,93');
+        break;
+      case 'diamond':
+        el = document.createElementNS(SVG_NS, 'polygon');
+        el.setAttribute('points', '50,4 96,50 50,96 4,50');
+        break;
+      case 'star':
+        el = document.createElementNS(SVG_NS, 'polygon');
+        el.setAttribute('points',
+          '50,4 61,38 96,38 68,58 79,93 50,72 21,93 32,58 4,38 39,38');
+        break;
+      case 'heart':
+        el = document.createElementNS(SVG_NS, 'path');
+        el.setAttribute('d',
+          'M50,90 C28,75 4,58 4,33 C4,18 18,8 33,8 C42,8 47,14 50,20 C53,14 58,8 67,8 C82,8 96,18 96,33 C96,58 72,75 50,90 Z');
+        break;
+      default:
+        el = document.createElementNS(SVG_NS, 'rect');
+        el.setAttribute('x', '4'); el.setAttribute('y', '4');
+        el.setAttribute('width', '92'); el.setAttribute('height', '92');
+    }
+    return el;
+  }
+
+  function applyShapeStyle(node) {
+    if (!node || node.type !== 'shape') return;
+    const child = node.shapeEl;
+    if (!child) return;
+    const s = node.style || {};
+    child.setAttribute('fill',         s.fill        || SHAPE_DEFAULT.fill);
+    child.setAttribute('stroke',       s.stroke      || SHAPE_DEFAULT.stroke);
+    child.setAttribute('stroke-width', s.strokeWidth || SHAPE_DEFAULT.strokeWidth);
+  }
+
+  function createShapeNode(x, y, w, h, shape, style) {
+    const el = document.createElement('div');
+    el.className = 'node shape';
+    el.style.left  = x + 'px';
+    el.style.top   = y + 'px';
+    el.style.width  = Math.max(2, w) + 'px';
+    el.style.height = Math.max(2, h) + 'px';
+
+    const svg = document.createElementNS(SVG_NS, 'svg');
+    svg.setAttribute('viewBox', '0 0 100 100');
+    svg.setAttribute('preserveAspectRatio', 'none');
+    const shapeEl = makeShapeSvg(shape);
+    svg.appendChild(shapeEl);
+    el.appendChild(svg);
+    canvas.appendChild(el);
+
+    const node = {
+      id: newId(), kind: 'node', type: 'shape', el,
+      x: x, y: y, w: Math.max(2, w), h: Math.max(2, h),
+      shape: shape, shapeEl: shapeEl,
+      style: style ? { ...style } : {},
+    };
+    el._mindNode = node;
+    nodes.set(node.id, node);
+    applyShapeStyle(node);
+    attachNodeDrag(node);
+    scheduleSave();
+    return node;
+  }
+
+  function setShapeBox(node, x, y, w, h) {
+    node.x = x; node.y = y; node.w = w; node.h = h;
+    node.el.style.left  = x + 'px';
+    node.el.style.top   = y + 'px';
+    node.el.style.width  = w + 'px';
+    node.el.style.height = h + 'px';
+  }
+
+  /* ============================ MODE BADGES ============================ */
 
   function setArrowMode(on) {
     state.arrowMode = !!on;
@@ -437,6 +581,7 @@
       if (n.type === 'text')          ns.push({ ...base, text: n.el.textContent });
       else if (n.type === 'image')    ns.push({ ...base, src: n.src });
       else if (n.type === 'checkbox') ns.push({ ...base, text: n.span.textContent, checked: !!n.cb.checked });
+      else if (n.type === 'shape')    ns.push({ ...base, shape: n.shape, w: n.w, h: n.h });
     }
     const ar = [];
     for (const el of arrowsLayer.children) {
@@ -488,7 +633,12 @@
           if (n.type === 'text')             node = createTextNode(+n.x || 0, +n.y || 0, n.text || '', false);
           else if (n.type === 'image' && n.src) node = createImageNode(+n.x || 0, +n.y || 0, n.src);
           else if (n.type === 'checkbox')    node = createCheckboxNode(+n.x || 0, +n.y || 0, n.text || '', !!n.checked);
-          if (node && n.style) { node.style = n.style; applyNodeStyle(node); }
+          else if (n.type === 'shape')      node = createShapeNode(+n.x || 0, +n.y || 0, +n.w || 60, +n.h || 60, n.shape || 'rect', n.style);
+          if (node && n.style) {
+            node.style = n.style;
+            if (node.type === 'shape') applyShapeStyle(node);
+            else applyNodeStyle(node);
+          }
         }
       }
       if (Array.isArray(data.arrows)) {
@@ -698,6 +848,27 @@
     scheduleSave();
   }
 
+  // Convert a text node ⇄ checkbox node, preserving position, text, and style.
+  function convertNodeType(node, newType) {
+    if (!node) return null;
+    if (node.type !== 'text' && node.type !== 'checkbox') return null;
+    if (node.type === newType) return node;
+    const x = node.x, y = node.y;
+    const text = node.type === 'text' ? node.el.textContent : node.span.textContent;
+    const style = node.style ? { ...node.style } : null;
+    deleteNode(node);
+    let next = null;
+    if (newType === 'checkbox') next = createCheckboxNode(x, y, text, false);
+    else if (newType === 'text') next = createTextNode(x, y, text, false);
+    if (next && style) {
+      next.style = style;
+      applyNodeStyle(next);
+    }
+    if (next) selectOnly(next);
+    scheduleSave();
+    return next;
+  }
+
   function createTextNode(x, y, text, autoEdit) {
     const el = document.createElement('div');
     el.className = 'node text';
@@ -862,6 +1033,103 @@
     const v = !(_styledNode && _styledNode.style && _styledNode.style.underline);
     setStyleProp('underline', v); spULine.classList.toggle('active', v);
   });
+
+  /* ============================ SHAPE WHEEL ============================
+     GTA-style radial picker. Triggered by Shift + Ctrl/Cmd + drag.
+     The angle of the drag picks the shape; the distance sizes it.        */
+
+  let _wheelBuilt = false;
+  function buildShapeWheel() {
+    if (_wheelBuilt) return;
+    _wheelBuilt = true;
+    const N = SHAPE_WHEEL_ORDER.length;
+    const r = 78;
+    SHAPE_WHEEL_ORDER.forEach((shape, i) => {
+      const ang = (i / N) * Math.PI * 2 - Math.PI / 2;
+      const w = document.createElement('div');
+      w.className = 'shape-wedge';
+      w.dataset.shape = shape;
+      w.dataset.idx = i;
+      w.textContent = SHAPE_ICON[shape];
+      w.style.left = (Math.cos(ang) * r) + 'px';
+      w.style.top  = (Math.sin(ang) * r) + 'px';
+      shapeWheel.appendChild(w);
+    });
+  }
+  function showShapeWheel(cx, cy) {
+    buildShapeWheel();
+    shapeWheel.style.left = cx + 'px';
+    shapeWheel.style.top  = cy + 'px';
+    shapeWheel.classList.add('show');
+  }
+  function hideShapeWheel() {
+    shapeWheel.classList.remove('show');
+    shapeWheel.querySelectorAll('.shape-wedge').forEach(w => w.classList.remove('active'));
+  }
+  function highlightShapeWheel(idx) {
+    shapeWheel.querySelectorAll('.shape-wedge').forEach((w, i) => {
+      w.classList.toggle('active', i === idx);
+    });
+  }
+  function shapeIndexFromDelta(dx, dy) {
+    const dist = Math.hypot(dx, dy);
+    if (dist < 26) return -1; // dead-zone in the middle
+    const N = SHAPE_WHEEL_ORDER.length;
+    let ang = Math.atan2(dy, dx) + Math.PI / 2;
+    if (ang < 0) ang += Math.PI * 2;
+    return Math.round((ang / (Math.PI * 2)) * N) % N;
+  }
+
+  function startShapeWheel(e) {
+    const startScreen = { x: e.clientX, y: e.clientY };
+    const startWorld  = toWorld(e.clientX, e.clientY);
+    showShapeWheel(startScreen.x, startScreen.y);
+
+    let chosenIdx = -1;
+    let node = null;
+
+    function ensureNode(shape) {
+      if (node && node.shape === shape) return;
+      if (node) { node.el.remove(); nodes.delete(node.id); state.selected.delete(node); }
+      node = createShapeNode(startWorld.x, startWorld.y, 2, 2, shape);
+    }
+    function updateNodeBox(ev) {
+      if (!node) return;
+      const ew = toWorld(ev.clientX, ev.clientY);
+      const dx = ew.x - startWorld.x;
+      const dy = ew.y - startWorld.y;
+      const x = dx >= 0 ? startWorld.x : startWorld.x + dx;
+      const y = dy >= 0 ? startWorld.y : startWorld.y + dy;
+      const w = Math.max(2, Math.abs(dx));
+      const h = Math.max(2, Math.abs(dy));
+      setShapeBox(node, x, y, w, h);
+    }
+
+    bindDrag((ev) => {
+      const dx = ev.clientX - startScreen.x;
+      const dy = ev.clientY - startScreen.y;
+      const idx = shapeIndexFromDelta(dx, dy);
+      if (idx !== chosenIdx) {
+        chosenIdx = idx;
+        highlightShapeWheel(idx);
+        if (idx >= 0) ensureNode(SHAPE_WHEEL_ORDER[idx]);
+        else if (node) { node.el.remove(); nodes.delete(node.id); state.selected.delete(node); node = null; }
+      }
+      if (node) updateNodeBox(ev);
+    }, () => {
+      hideShapeWheel();
+      if (!node) return;
+      if (node.w < 12 || node.h < 12) {
+        // too small / cancelled → drop it
+        node.el.remove();
+        nodes.delete(node.id);
+        state.selected.delete(node);
+      } else {
+        selectOnly(node);
+        scheduleSave();
+      }
+    });
+  }
 
   /* ============================ ARROWS ============================ */
 
@@ -1246,14 +1514,23 @@
   // ────────────────────────────────────────────────────────────────────
   window.addEventListener('mousedown', (e) => {
     if (e.button !== 0) return;
-    const wantArrow = (e.ctrlKey || e.metaKey || state.arrowMode);
-    if (!wantArrow) return;
-    if (e.target && e.target.closest && (
+    const inUI = e.target && e.target.closest && (
           e.target.closest('#ctx-menu') ||
           e.target.closest('#style-popup') ||
           e.target.closest('#lightbox') ||
-          e.target.closest('#mode-badge')))
+          e.target.closest('#mode-badge') ||
+          e.target.closest('#shape-wheel'));
+    if (inUI) return;
+    // Shift + Ctrl/Cmd + drag → shape wheel (GTA-style)
+    if ((e.ctrlKey || e.metaKey) && e.shiftKey) {
+      e.preventDefault();
+      e.stopPropagation();
+      startShapeWheel(e);
       return;
+    }
+    // Ctrl/Cmd alone (or arrow mode) → arrow drawing
+    const wantArrow = (e.ctrlKey || e.metaKey || state.arrowMode);
+    if (!wantArrow) return;
     e.preventDefault();
     e.stopPropagation();
     if (state.arrowMode) setArrowMode(false);
@@ -1447,6 +1724,13 @@
         addItem('Open / Zoom Image', () => openLightbox(target.src));
         addSep();
       }
+      if (target.kind === 'node' && target.type === 'text') {
+        addItem('Convert to Checkbox', () => convertNodeType(target, 'checkbox'));
+        addSep();
+      } else if (target.kind === 'node' && target.type === 'checkbox') {
+        addItem('Convert to Text', () => convertNodeType(target, 'text'));
+        addSep();
+      }
       addItem('Bring to Front (↑)', bringSelectedForward);
       addItem('Send to Back (↓)',   sendSelectedBackward);
       addSep();
@@ -1484,7 +1768,7 @@
         try { localStorage.removeItem(STORAGE_KEY); } catch (e) {}
       }, { danger: true });
       addSep();
-      addHint('A = arrow mode · Ctrl+drag = arrow · V = menu · double-click empty = add text · Alt+click = cycle stacked nodes · Space+drag = pan');
+      addHint('A = arrow mode · Ctrl+drag = arrow · Shift+Ctrl+drag = shape wheel · V = menu · double-click empty = add text · Alt+click = cycle stacked · Space+drag = pan');
     }
 
     ctxMenu.style.left = e.clientX + 'px';
