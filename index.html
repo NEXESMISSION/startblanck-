@@ -32,6 +32,34 @@
   #canvas-wrap.arrow-mode .node,
   #canvas-wrap.arrow-mode .arrow .hit { cursor: crosshair !important; }
 
+  /* Undo / Redo glass pill — top-left of the canvas. */
+  #history-bar {
+    position: fixed; top: 14px; left: 14px;
+    display: flex; gap: 2px;
+    background: rgba(255,255,255,0.78);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    border: 1px solid rgba(0,0,0,0.06);
+    border-radius: 12px;
+    padding: 4px;
+    box-shadow:
+      0 8px 24px rgba(15,23,42,0.10),
+      0 2px 4px rgba(15,23,42,0.04);
+    z-index: 200;
+  }
+  #history-bar button {
+    width: 32px; height: 32px;
+    border: none; background: transparent;
+    border-radius: 8px;
+    cursor: pointer;
+    color: #18181b;
+    display: flex; align-items: center; justify-content: center;
+    transition: background 0.12s ease, opacity 0.12s ease;
+    padding: 0;
+  }
+  #history-bar button:hover:not([disabled]) { background: rgba(15,23,42,0.06); }
+  #history-bar button[disabled] { opacity: 0.32; cursor: not-allowed; }
+
   #mode-badge {
     position: fixed; top: 14px; right: 14px;
     background: rgba(9,9,11,0.85);
@@ -426,6 +454,23 @@
 <div id="ctx-menu"></div>
 <div id="mode-badge"></div>
 
+<div id="history-bar">
+  <button id="hb-undo" title="Undo (Ctrl+Z)" aria-label="Undo" disabled>
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+         stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M3 12a9 9 0 0 1 17 4"/>
+      <polyline points="3 6 3 12 9 12"/>
+    </svg>
+  </button>
+  <button id="hb-redo" title="Redo (Ctrl+Shift+Z)" aria-label="Redo" disabled>
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+         stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M21 12a9 9 0 0 0 -17 4"/>
+      <polyline points="21 6 21 12 15 12"/>
+    </svg>
+  </button>
+</div>
+
 <div id="style-popup">
   <select id="sp-font" title="Font">
     <option value="">Jakarta</option>
@@ -490,6 +535,8 @@
   const ctxMenu    = document.getElementById('ctx-menu');
   const modeBadge  = document.getElementById('mode-badge');
   const stylePopup = document.getElementById('style-popup');
+  const hbUndo     = document.getElementById('hb-undo');
+  const hbRedo     = document.getElementById('hb-redo');
   const spFont     = document.getElementById('sp-font');
   const spSize     = document.getElementById('sp-size');
   const spBold     = document.getElementById('sp-bold');
@@ -808,7 +855,60 @@
       };
       localStorage.setItem(STORAGE_KEY, JSON.stringify(lsData));
     } catch (e) { /* quota — IDB is primary */ }
+    // Undo tracking — record the snapshot unless we're applying one.
+    if (!_suppressUndo) {
+      const json = JSON.stringify(data);
+      if (_undoStack.length === 0 || _undoStack[_undoStack.length - 1] !== json) {
+        _undoStack.push(json);
+        if (_undoStack.length > MAX_UNDO) _undoStack.shift();
+        _redoStack.length = 0;
+        updateHistoryButtons();
+      }
+    }
   }
+
+  function updateHistoryButtons() {
+    if (!hbUndo || !hbRedo) return;
+    hbUndo.disabled = _undoStack.length < 2;
+    hbRedo.disabled = _redoStack.length === 0;
+  }
+
+  // Wipe the canvas and rebuild from a snapshot. Used by undo / redo.
+  function applyFullSnapshot(data) {
+    _suppressSave = true;
+    _suppressUndo = true;
+    try {
+      for (const n of [...nodes.values()]) n.el.remove();
+      nodes.clear();
+      for (const a of [...arrows.values()]) a.el.remove();
+      arrows.clear();
+      state.selected.clear();
+      updateStylePopup();
+      applySnapshot(data);
+    } finally {
+      _suppressSave = false;
+    }
+    saveNow();
+    _suppressUndo = false;
+    updateHistoryButtons();
+  }
+
+  function undo() {
+    if (_undoStack.length < 2) return;
+    const cur = _undoStack.pop();
+    _redoStack.push(cur);
+    const prev = _undoStack[_undoStack.length - 1];
+    applyFullSnapshot(JSON.parse(prev));
+  }
+  function redo() {
+    if (_redoStack.length === 0) return;
+    const next = _redoStack.pop();
+    _undoStack.push(next);
+    applyFullSnapshot(JSON.parse(next));
+  }
+
+  hbUndo.addEventListener('click', undo);
+  hbRedo.addEventListener('click', redo);
 
   function applySnapshot(data) {
     _suppressSave = true;
@@ -1908,6 +2008,16 @@
       e.preventDefault();
       setArrowMode(!state.arrowMode);
       return;
+    }
+    // Ctrl+Z = undo, Ctrl+Shift+Z / Ctrl+Y = redo. Skipped while editing
+    // text or focused in a form input so the browser's native undo/redo
+    // works inside text editors.
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && !isEditing() && !isFormFocused()) {
+      const k = e.key.toLowerCase();
+      if (k === 'z' && !e.shiftKey) { e.preventDefault(); undo(); return; }
+      if ((k === 'z' && e.shiftKey) || k === 'y') {
+        e.preventDefault(); redo(); return;
+      }
     }
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a' && !isEditing() && !isFormFocused()) {
       e.preventDefault();
