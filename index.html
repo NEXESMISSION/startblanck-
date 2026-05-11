@@ -239,21 +239,23 @@
     user-select: none;
   }
   .node.table .t-grid {
-    border-collapse: separate;
-    border-spacing: 0;
-    width: 100%;
-    table-layout: fixed;
+    border-collapse: collapse;
+    width: auto;
   }
   .node.table .t-grid td {
-    border: 1px solid rgba(0,0,0,0.07);
+    border: 1px solid rgba(0,0,0,0.10);
     padding: 7px 10px;
-    min-width: 90px;
+    min-width: 100px;
+    max-width: 280px;
     vertical-align: top;
     font-weight: 450;
     letter-spacing: -0.005em;
+    word-break: break-word;
   }
-  .node.table .t-grid tr:first-child td { background: rgba(15,23,42,0.025); font-weight: 600; }
-  .node.table .t-grid td:first-child { border-top-left-radius: 0; }
+  .node.table .t-grid tr:first-child td {
+    background: rgba(15,23,42,0.025);
+    font-weight: 600;
+  }
   .node.table .cell-text {
     outline: none;
     white-space: pre-wrap;
