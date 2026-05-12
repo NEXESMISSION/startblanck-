@@ -948,6 +948,10 @@
   function hideShapePopup() {
     shapePopup.classList.remove('show');
     _shapedNode = null;
+    // The colour picker keeps keyboard focus even after the popup is
+    // hidden — explicitly blur so Ctrl+Z is no longer routed at it.
+    const ae = document.activeElement;
+    if (ae && shapePopup.contains(ae)) ae.blur();
   }
   function _setShapeStyleProp(prop, value) {
     if (!_shapedNode) return;
@@ -1094,7 +1098,18 @@
     const ae = document.activeElement;
     if (!ae) return false;
     const t = ae.tagName;
-    return t === 'INPUT' || t === 'SELECT' || t === 'TEXTAREA';
+    // Only block our global shortcuts when the user is genuinely text-
+    // editing. Colour / range / checkbox / radio inputs (e.g. the shape
+    // colour picker) shouldn't swallow Ctrl+Z and friends.
+    if (t === 'INPUT') {
+      const type = (ae.type || 'text').toLowerCase();
+      if (type === 'color' || type === 'range' || type === 'checkbox' ||
+          type === 'radio'  || type === 'button' || type === 'submit') {
+        return false;
+      }
+      return true;
+    }
+    return t === 'SELECT' || t === 'TEXTAREA';
   }
 
   /* ============================ DRAG HELPER ============================
@@ -1506,6 +1521,11 @@
     node.el.addEventListener('mousedown', (e) => {
       if (e.button !== 0) return;
       if (state.spaceDown) return;
+      // Any node interaction other than dbl-click on a shape should close
+      // the shape colour popup so it doesn't visually trail the moving
+      // element (and so its colour picker doesn't keep focus, which would
+      // otherwise eat Ctrl+Z).
+      if (shapePopup.classList.contains('show')) hideShapePopup();
       // Locked nodes are inert. The lock button itself stops propagation
       // before reaching here, so reaching this branch means the user clicked
       // the body of a locked node — ignore.
@@ -2297,9 +2317,10 @@
         deleteArrow(arrow);
         return;
       }
-      const wp1 = { x: s.x + (e2.x - s.x) / 3,     y: s.y + (e2.y - s.y) / 3     };
-      const wp2 = { x: s.x + 2 * (e2.x - s.x) / 3, y: s.y + 2 * (e2.y - s.y) / 3 };
-      arrow.points = [s, wp1, wp2, e2];
+      // Keep the arrow as a straight 2-point line by default. Users can
+      // add waypoints later by double-clicking the line, and remove them
+      // by double-clicking a waypoint.
+      arrow.points = [s, e2];
       arrow.el.classList.remove('drafting');
       renderArrow(arrow);
       selectOnly(arrow);
@@ -2383,9 +2404,13 @@
       wrap.classList.add('panning');
       const startMouse = { x: e.clientX, y: e.clientY };
       const startView  = { x: view.x, y: view.y };
+      // Holding Ctrl/Cmd while panning multiplies the pan distance for
+      // quick cross-canvas navigation. Speed updates live so the user can
+      // press / release Ctrl mid-drag for fine control.
       bindDrag((ev) => {
-        view.x = startView.x + (ev.clientX - startMouse.x);
-        view.y = startView.y + (ev.clientY - startMouse.y);
+        const speed = (ev.ctrlKey || ev.metaKey) ? 3 : 1;
+        view.x = startView.x + (ev.clientX - startMouse.x) * speed;
+        view.y = startView.y + (ev.clientY - startMouse.y) * speed;
         applyTransform();
         repositionStylePopup();
       }, () => { wrap.classList.remove('panning'); scheduleSave(); });
@@ -2654,9 +2679,14 @@
     const inUI = e.target && e.target.closest && (
           e.target.closest('#ctx-menu') ||
           e.target.closest('#style-popup') ||
+          e.target.closest('#shape-popup') ||
+          e.target.closest('#crop-modal') ||
           e.target.closest('#lightbox') ||
           e.target.closest('#mode-badge'));
     if (inUI) return;
+    // Space takes priority — let the pan handler take over even when Ctrl
+    // is held (Space+Ctrl is "fast pan").
+    if (state.spaceDown) return;
     // Shift + Ctrl/Cmd + drag → draw a rectangle interactively.
     if ((e.ctrlKey || e.metaKey) && e.shiftKey) {
       e.preventDefault();
@@ -2984,6 +3014,8 @@
     cropModal.classList.remove('show');
     _cropNode = null;
     cropImg.src = '';
+    const ae = document.activeElement;
+    if (ae && cropModal.contains(ae)) ae.blur();
   }
   function applyCrop() {
     const node = _cropNode;
