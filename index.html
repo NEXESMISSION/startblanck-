@@ -383,6 +383,9 @@
   /* narrow hit area at all times — wider widths swallow clicks meant for
      nearby empty space (which is how you deselect). */
   .arrow .hit  { fill: none; stroke: transparent; stroke-width: 6; pointer-events: stroke; cursor: pointer; }
+  /* Coloured arrows (e.g. Ctrl+Alt = red). Selection / drafting rules come
+     after so they win over the colour when the arrow is selected. */
+  .arrow.arrow-red .line { stroke: #ef4444; }
   .arrow.selected .line  { stroke: #3b82f6; }
   .arrow.drafting .line  { stroke: #3b82f6; stroke-width: 2.5; stroke-dasharray: 6 4; }
   .arrow .start-dot { fill: #3b82f6; stroke: #ffffff; stroke-width: 1.5; pointer-events: none; }
@@ -514,6 +517,139 @@
     background-position: right 8px center;
   }
 
+  /* Shape style popup — same look as #style-popup, but for shapes only. */
+  #shape-popup {
+    position: fixed; display: none;
+    background: rgba(255,255,255,0.78);
+    backdrop-filter: blur(24px) saturate(180%);
+    -webkit-backdrop-filter: blur(24px) saturate(180%);
+    border: 1px solid rgba(0,0,0,0.06);
+    border-radius: 14px;
+    padding: 6px;
+    box-shadow:
+      0 12px 32px rgba(15,23,42,0.12),
+      0 2px 6px rgba(15,23,42,0.04);
+    z-index: 160;
+    align-items: center;
+    gap: 2px;
+    font-size: 12px;
+    user-select: none;
+  }
+  #shape-popup.show { display: flex; }
+  #shape-popup .swatch {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 0 8px;
+    border-radius: 8px;
+    height: 30px;
+    color: #71717a;
+    font-weight: 600;
+    transition: background 0.12s ease;
+    cursor: pointer;
+  }
+  #shape-popup .swatch:hover { background: rgba(15,23,42,0.06); }
+  #shape-popup input[type=color] {
+    border: none; padding: 0;
+    width: 18px; height: 18px;
+    border-radius: 4px;
+    cursor: pointer; background: none;
+  }
+  #shape-popup input[type=number] {
+    width: 46px; padding: 0 6px;
+    height: 30px;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    background: transparent;
+    font: inherit; font-size: 12px; font-weight: 500;
+    color: #18181b;
+    cursor: text;
+  }
+  #shape-popup input[type=number]:hover,
+  #shape-popup input[type=number]:focus { background: rgba(15,23,42,0.06); outline: none; }
+  #shape-popup button {
+    border: 1px solid transparent;
+    border-radius: 8px;
+    background: transparent;
+    padding: 0 10px;
+    font: inherit; font-size: 12px; font-weight: 500;
+    color: #18181b;
+    height: 30px;
+    cursor: pointer;
+    transition: background 0.12s ease;
+  }
+  #shape-popup button:hover { background: rgba(15,23,42,0.06); }
+  #shape-popup button.active { background: #18181b; color: #fff; }
+  #shape-popup .sep { width: 1px; height: 18px; background: rgba(0,0,0,0.08); margin: 0 4px; }
+
+  /* Image crop modal — full-screen overlay with the image and a draggable
+     selection rectangle. Apply / Cancel buttons commit or close. */
+  #crop-modal {
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.86);
+    display: none;
+    z-index: 1100;
+    align-items: center; justify-content: center;
+    flex-direction: column;
+    gap: 14px;
+  }
+  #crop-modal.show { display: flex; }
+  #crop-stage {
+    position: relative;
+    line-height: 0;
+    box-shadow: 0 12px 40px rgba(0,0,0,0.45);
+  }
+  #crop-img {
+    display: block;
+    max-width: 88vw; max-height: 78vh;
+    user-select: none;
+    -webkit-user-drag: none;
+    pointer-events: none;
+  }
+  #crop-rect {
+    position: absolute;
+    border: 1.5px solid #3b82f6;
+    box-shadow: 0 0 0 9999px rgba(0,0,0,0.55);
+    cursor: move;
+    box-sizing: border-box;
+  }
+  #crop-rect .crop-handle {
+    position: absolute;
+    width: 12px; height: 12px;
+    background: #ffffff;
+    border: 1.5px solid #3b82f6;
+    border-radius: 50%;
+    box-sizing: border-box;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.18);
+  }
+  #crop-rect .crop-handle.nw { left: -7px;  top: -7px;     cursor: nw-resize; }
+  #crop-rect .crop-handle.ne { right: -7px; top: -7px;     cursor: ne-resize; }
+  #crop-rect .crop-handle.sw { left: -7px;  bottom: -7px;  cursor: sw-resize; }
+  #crop-rect .crop-handle.se { right: -7px; bottom: -7px;  cursor: se-resize; }
+  #crop-controls {
+    display: flex; gap: 10px; align-items: center;
+    background: rgba(255,255,255,0.94);
+    border-radius: 12px;
+    padding: 6px 10px;
+    box-shadow: 0 12px 32px rgba(0,0,0,0.3);
+  }
+  #crop-controls button {
+    font: inherit;
+    font-weight: 600;
+    font-size: 13px;
+    padding: 8px 14px;
+    border-radius: 8px;
+    border: 1px solid rgba(0,0,0,0.08);
+    background: #ffffff;
+    color: #18181b;
+    cursor: pointer;
+    transition: background 0.12s ease, transform 0.08s ease;
+  }
+  #crop-controls button:hover { background: rgba(15,23,42,0.06); }
+  #crop-controls button.primary {
+    background: #18181b; color: #fff; border-color: #18181b;
+  }
+  #crop-controls button.primary:hover { background: #27272a; }
+  #crop-controls .hint { color: #71717a; font-size: 12px; padding: 0 4px; }
+
   #lightbox {
     position: fixed; inset: 0; background: rgba(0,0,0,0.92);
     display: none; align-items: center; justify-content: center;
@@ -554,6 +690,10 @@
       <marker id="arrowhead-draft" viewBox="0 0 10 10" refX="9" refY="5"
         markerUnits="strokeWidth" markerWidth="5" markerHeight="5" orient="auto">
         <path d="M 0 0 L 10 5 L 0 10 z" fill="#3b82f6"/>
+      </marker>
+      <marker id="arrowhead-red" viewBox="0 0 10 10" refX="9" refY="5"
+        markerUnits="strokeWidth" markerWidth="5" markerHeight="5" orient="auto">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="#ef4444"/>
       </marker>
     </defs>
     <g id="arrows-layer"></g>
@@ -623,6 +763,32 @@
   </select>
 </div>
 
+<div id="shape-popup">
+  <label class="swatch" title="Fill colour">▣<input id="shp-fill" type="color" value="#3b82f6"></label>
+  <button id="shp-nofill" title="No fill">∅</button>
+  <span class="sep"></span>
+  <label class="swatch" title="Stroke colour">▢<input id="shp-stroke" type="color" value="#18181b"></label>
+  <input id="shp-stroke-width" type="number" min="0" max="20" step="0.5" value="1.5" title="Stroke width">
+</div>
+
+<div id="crop-modal">
+  <div id="crop-stage">
+    <img id="crop-img" alt="">
+    <div id="crop-rect">
+      <div class="crop-handle nw"></div>
+      <div class="crop-handle ne"></div>
+      <div class="crop-handle sw"></div>
+      <div class="crop-handle se"></div>
+    </div>
+  </div>
+  <div id="crop-controls">
+    <span class="hint">Drag the box · drag corners to resize</span>
+    <button id="crop-reset">Reset</button>
+    <button id="crop-cancel">Cancel</button>
+    <button id="crop-apply" class="primary">Apply Crop</button>
+  </div>
+</div>
+
 <input id="file-input" type="file" accept="image/*">
 
 <div id="lightbox">
@@ -655,6 +821,20 @@
   const spStrokeC  = document.getElementById('sp-stroke-color');
   const spStrokeW  = document.getElementById('sp-stroke-width');
   const spPreset   = document.getElementById('sp-preset');
+
+  const shapePopup = document.getElementById('shape-popup');
+  const shpFill    = document.getElementById('shp-fill');
+  const shpNoFill  = document.getElementById('shp-nofill');
+  const shpStroke  = document.getElementById('shp-stroke');
+  const shpStrokeW = document.getElementById('shp-stroke-width');
+
+  const cropModal   = document.getElementById('crop-modal');
+  const cropStage   = document.getElementById('crop-stage');
+  const cropImg     = document.getElementById('crop-img');
+  const cropRect    = document.getElementById('crop-rect');
+  const cropApplyBtn  = document.getElementById('crop-apply');
+  const cropCancelBtn = document.getElementById('crop-cancel');
+  const cropResetBtn  = document.getElementById('crop-reset');
 
   const SVG_NS = 'http://www.w3.org/2000/svg';
 
@@ -737,6 +917,67 @@
     child.setAttribute('stroke-width', s.strokeWidth || SHAPE_DEFAULT.strokeWidth);
   }
 
+  /* Shape colour / stroke popup — opens on double-click of a shape. Lets
+     the user pick fill (or "no fill"), stroke colour, and stroke width.   */
+  let _shapedNode = null;
+  function repositionShapePopup() {
+    if (!_shapedNode || !shapePopup.classList.contains('show')) return;
+    const r = _shapedNode.el.getBoundingClientRect();
+    const ph = shapePopup.offsetHeight || 38;
+    const pw = shapePopup.offsetWidth  || 220;
+    let top  = r.top - ph - 10;
+    if (top < 8) top = r.bottom + 10;
+    let left = r.left + (r.width - pw) / 2;
+    if (left + pw > window.innerWidth - 8) left = window.innerWidth - pw - 8;
+    if (left < 8) left = 8;
+    shapePopup.style.left = left + 'px';
+    shapePopup.style.top  = top  + 'px';
+  }
+  function openShapePopup(node) {
+    if (!node || node.type !== 'shape') return;
+    _shapedNode = node;
+    const s = node.style || {};
+    const fill = s.fill && s.fill !== 'none' ? s.fill : '#3b82f6';
+    shpFill.value = fill;
+    shpNoFill.classList.toggle('active', !s.fill || s.fill === 'none');
+    shpStroke.value = s.stroke || SHAPE_DEFAULT.stroke;
+    shpStrokeW.value = +s.strokeWidth || SHAPE_DEFAULT.strokeWidth;
+    shapePopup.classList.add('show');
+    requestAnimationFrame(repositionShapePopup);
+  }
+  function hideShapePopup() {
+    shapePopup.classList.remove('show');
+    _shapedNode = null;
+  }
+  function _setShapeStyleProp(prop, value) {
+    if (!_shapedNode) return;
+    if (!_shapedNode.style) _shapedNode.style = {};
+    _shapedNode.style[prop] = value;
+    applyShapeStyle(_shapedNode);
+    scheduleSave();
+  }
+  shapePopup.addEventListener('mousedown', (e) => e.stopPropagation());
+  shpFill.addEventListener('input', () => {
+    shpNoFill.classList.remove('active');
+    _setShapeStyleProp('fill', shpFill.value);
+  });
+  shpNoFill.addEventListener('click', () => {
+    const isNo = !shpNoFill.classList.contains('active');
+    shpNoFill.classList.toggle('active', isNo);
+    _setShapeStyleProp('fill', isNo ? 'none' : shpFill.value);
+  });
+  shpStroke.addEventListener('input',  () => _setShapeStyleProp('stroke',      shpStroke.value));
+  shpStrokeW.addEventListener('input', () => _setShapeStyleProp('strokeWidth', Math.max(0, +shpStrokeW.value || 0)));
+
+  // Close shape popup when clicking outside.
+  document.addEventListener('mousedown', (e) => {
+    if (!shapePopup.classList.contains('show')) return;
+    if (e.target.closest && e.target.closest('#shape-popup')) return;
+    // Keep open while interacting with the shape itself.
+    if (_shapedNode && _shapedNode.el && _shapedNode.el.contains(e.target)) return;
+    hideShapePopup();
+  }, true);
+
   function createShapeNode(x, y, w, h, shape, style) {
     const el = document.createElement('div');
     el.className = 'node shape shape-' + shape;
@@ -781,6 +1022,15 @@
 
     attachNodeDrag(node);
     el.appendChild(makeLockButton(node));
+
+    // Double-click → open the shape colour / stroke popup.
+    el.addEventListener('dblclick', (e) => {
+      if (node.locked) return;
+      e.stopPropagation();
+      if (!state.selected.has(node)) selectOnly(node);
+      openShapePopup(node);
+    });
+
     scheduleSave();
     return node;
   }
@@ -941,7 +1191,9 @@
     for (const el of arrowsLayer.children) {
       const a = el._mindArrow;
       if (!a) continue;
-      ar.push({ points: a.points.map(p => ({ x: +p.x, y: +p.y })) });
+      const entry = { points: a.points.map(p => ({ x: +p.x, y: +p.y })) };
+      if (a.color) entry.color = a.color;
+      ar.push(entry);
     }
     return { view: { x: view.x, y: view.y, scale: view.scale }, nodes: ns, arrows: ar };
   }
@@ -1056,6 +1308,10 @@
       }
       if (Array.isArray(data.arrows)) {
         for (const a of data.arrows) {
+          if (a && Array.isArray(a.points) && a.points.length >= 2) {
+            createArrow(a.points.map(p => ({ x: +p.x, y: +p.y })), a.color ? { color: a.color } : null);
+            continue;
+          }
           if (a.points && a.points.length >= 2)
             createArrow(a.points.map(p => ({ x: +p.x, y: +p.y })));
         }
@@ -1375,7 +1631,10 @@
     el.addEventListener('dblclick', (e) => {
       if (node.locked) return;
       e.stopPropagation();
-      openLightbox(src);
+      // Shift + double-click → zoom in lightbox.
+      // Plain double-click → open crop editor.
+      if (e.shiftKey) openLightbox(node.src);
+      else openCropper(node);
     });
     el.appendChild(makeLockButton(node));
     // Images are heavy — save IMMEDIATELY (not via the 250 ms debounce) so a
@@ -1703,7 +1962,11 @@
   /* ============================ STYLE POPUP ============================ */
 
   let _styledNode = null;
+  function _repositionAllFloatingPopups() {
+    repositionShapePopup();
+  }
   function repositionStylePopup() {
+    _repositionAllFloatingPopups();
     if (!_styledNode || !stylePopup.classList.contains('show')) return;
     const r = _styledNode.el.getBoundingClientRect();
     const ph = stylePopup.offsetHeight || 36;
@@ -1877,11 +2140,12 @@
 
   /* ============================ ARROWS ============================ */
 
-  function createArrow(points) {
+  function createArrow(points, opts) {
     const g = document.createElementNS(SVG_NS, 'g');
     g.setAttribute('class', 'arrow');
     arrowsLayer.appendChild(g);
     const arrow = { id: newId(), kind: 'arrow', el: g, points };
+    if (opts && opts.color) arrow.color = opts.color;
     g._mindArrow = arrow;
     arrows.set(arrow.id, arrow);
     renderArrow(arrow);
@@ -1952,7 +2216,17 @@
     const line = document.createElementNS(SVG_NS, 'path');
     line.setAttribute('class', 'line');
     line.setAttribute('d', d);
-    line.setAttribute('marker-end', drafting ? 'url(#arrowhead-draft)' : 'url(#arrowhead)');
+    // The line colour is driven by class (so selection / drafting CSS rules
+     // can still take over). The arrowhead marker is set per render — pick a
+     // matching red marker when the arrow is coloured red.
+    const isRed = arrow.color === '#ef4444';
+    arrow.el.classList.toggle('arrow-red', isRed);
+    line.setAttribute(
+      'marker-end',
+      drafting     ? 'url(#arrowhead-draft)'
+      : isRed      ? 'url(#arrowhead-red)'
+      :              'url(#arrowhead)'
+    );
     arrow.el.appendChild(line);
 
     // While drafting an arrow, show a visible dot at the start so the
@@ -2004,11 +2278,11 @@
     });
   }
 
-  function startArrowFromMouse(e) {
+  function startArrowFromMouse(e, opts) {
     hideContextMenu();
     const start = toWorld(e.clientX, e.clientY);
     const points = [{ x: start.x, y: start.y }, { x: start.x, y: start.y }];
-    const arrow = createArrow(points);
+    const arrow = createArrow(points, opts);
     arrow.el.classList.add('drafting');
     renderArrow(arrow);
 
@@ -2272,6 +2546,8 @@
     if (e.key === 'Escape') {
       abortAllDrags();
       if (state.arrowMode) { setArrowMode(false); return; }
+      if (cropModal.classList.contains('show')) { closeCropper(); return; }
+      if (shapePopup.classList.contains('show')) { hideShapePopup(); return; }
       if (lb.classList.contains('show')) closeLightbox();
       else if (ctxMenu.classList.contains('show')) hideContextMenu();
       else clearSelection();
@@ -2300,6 +2576,28 @@
       for (const n of nodes.values())  if (!n.locked) addToSelection(n);
       for (const a of arrows.values()) addToSelection(a);
       return;
+    }
+    // Ctrl+C / Ctrl+X / Ctrl+V — copy, cut, paste the current selection.
+    // The `copy` and `paste` document listeners do the heavy lifting, but
+    // browsers don't reliably fire a `copy` event when nothing is text-
+    // selectable, so we also seed _internalClipboard right here.
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && !isEditing() && !isFormFocused()) {
+      const k = e.key.toLowerCase();
+      if ((k === 'c' || k === 'x') && state.selected.size > 0) {
+        _internalClipboard = _serializeForClipboard([...state.selected]);
+        if (k === 'x') {
+          e.preventDefault();
+          deleteSelected();
+        }
+        // Don't preventDefault for 'c' — let the native `copy` event also
+        // fire so the system clipboard receives our payload.
+        return;
+      }
+      if (k === 'v' && _internalClipboard) {
+        // The `paste` event runs automatically and reads from
+        // _internalClipboard as a fallback — we don't preventDefault here.
+        return;
+      }
     }
     if (e.key.toLowerCase() === 'v' && !e.ctrlKey && !e.metaKey && !e.altKey
         && !isEditing() && !isFormFocused()) {
@@ -2366,6 +2664,14 @@
       startShapeDrag(e, 'rect');
       return;
     }
+    // Ctrl/Cmd + Alt + drag → draw a RED arrow.
+    if ((e.ctrlKey || e.metaKey) && e.altKey) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (state.arrowMode) setArrowMode(false);
+      startArrowFromMouse(e, { color: '#ef4444' });
+      return;
+    }
     // Ctrl/Cmd alone (or arrow mode) → arrow drawing
     const wantArrow = (e.ctrlKey || e.metaKey || state.arrowMode);
     if (!wantArrow) return;
@@ -2395,10 +2701,152 @@
     return toWorld(_lastMouse.x, _lastMouse.y);
   }
 
+  /* Internal clipboard for copy/paste of mind-map items. Stored both as a
+     JS variable and as a JSON payload on the system clipboard under a custom
+     MIME type, so paste survives even when copy data isn't echoed back.    */
+  const CLIPBOARD_MIME = 'application/x-mindmap+json';
+  let _internalClipboard = null;
+
+  function _serializeForClipboard(items) {
+    const nodesData = [], arrowsData = [];
+    let minX = Infinity, minY = Infinity;
+    for (const it of items) {
+      if (it.kind === 'node') {
+        const n = it;
+        const base = { type: n.type, x: n.x, y: n.y };
+        if (n.style && Object.keys(n.style).length) base.style = { ...n.style };
+        if (n.type === 'text')          nodesData.push({ ...base, text: n.el.textContent });
+        else if (n.type === 'image')    nodesData.push({ ...base, src: n.src });
+        else if (n.type === 'checkbox') nodesData.push({ ...base, text: n.span.textContent, checked: !!n.cb.checked });
+        else if (n.type === 'shape')    nodesData.push({ ...base, shape: n.shape, w: n.w, h: n.h });
+        else if (n.type === 'bookmark') nodesData.push({ ...base, number: +n.number || 0 });
+        else if (n.type === 'table')    nodesData.push({ ...base, cols: n.cols, rows: n.rows.map(r => r.map(c => ({ ...c }))) });
+        if (n.x < minX) minX = n.x;
+        if (n.y < minY) minY = n.y;
+      } else if (it.kind === 'arrow') {
+        const a = it;
+        const entry = { points: a.points.map(p => ({ x: p.x, y: p.y })) };
+        if (a.color) entry.color = a.color;
+        arrowsData.push(entry);
+        for (const p of a.points) {
+          if (p.x < minX) minX = p.x;
+          if (p.y < minY) minY = p.y;
+        }
+      }
+    }
+    if (!isFinite(minX)) minX = 0;
+    if (!isFinite(minY)) minY = 0;
+    return { anchorX: minX, anchorY: minY, nodes: nodesData, arrows: arrowsData };
+  }
+
+  function _pasteSerialized(payload) {
+    if (!payload || (!payload.nodes && !payload.arrows)) return false;
+    const w = _pastePosition();
+    const dx = w.x - (payload.anchorX || 0);
+    const dy = w.y - (payload.anchorY || 0);
+    clearSelection();
+    const created = [];
+    for (const n of (payload.nodes || [])) {
+      const x = (+n.x || 0) + dx, y = (+n.y || 0) + dy;
+      let node = null;
+      if      (n.type === 'text')      node = createTextNode(x, y, n.text || '', false);
+      else if (n.type === 'image')     node = n.src ? createImageNode(x, y, n.src) : null;
+      else if (n.type === 'checkbox')  node = createCheckboxNode(x, y, n.text || '', !!n.checked);
+      else if (n.type === 'shape')     node = createShapeNode(x, y, +n.w || 60, +n.h || 60, n.shape || 'rect', n.style);
+      else if (n.type === 'bookmark')  node = createBookmarkNode(x, y, nextBookmarkNumber());
+      else if (n.type === 'table')     node = createTableNode(x, y, n.rows, +n.cols || 2);
+      if (node) {
+        if (n.style) {
+          node.style = { ...n.style };
+          if (node.type === 'shape') applyShapeStyle(node);
+          else applyNodeStyle(node);
+        }
+        created.push(node);
+      }
+    }
+    for (const a of (payload.arrows || [])) {
+      if (!Array.isArray(a.points) || a.points.length < 2) continue;
+      const pts = a.points.map(p => ({ x: (+p.x || 0) + dx, y: (+p.y || 0) + dy }));
+      const arrow = createArrow(pts, a.color ? { color: a.color } : null);
+      created.push(arrow);
+    }
+    for (const it of created) addToSelection(it);
+    scheduleSave();
+    return created.length > 0;
+  }
+
+  // Ctrl+C / Ctrl+X — system 'copy' / 'cut' events fire when nothing is
+  // focused for editing. We intercept them and write our own payload.
+  document.addEventListener('copy', (e) => {
+    if (isEditing() || isFormFocused()) return;
+    const items = [...state.selected];
+    if (!items.length) return;
+    const payload = _serializeForClipboard(items);
+    _internalClipboard = payload;
+    try {
+      e.clipboardData.setData(CLIPBOARD_MIME, JSON.stringify(payload));
+      // Also write a plain-text fallback so pasting into other apps yields
+      // something readable instead of nothing.
+      const text = items.map(it => {
+        if (it.kind === 'node') {
+          if (it.type === 'text')     return it.el.textContent;
+          if (it.type === 'checkbox') return (it.cb.checked ? '[x] ' : '[ ] ') + it.span.textContent;
+          if (it.type === 'image')    return '[image]';
+          if (it.type === 'shape')    return '[' + it.shape + ']';
+          if (it.type === 'bookmark') return '[bookmark ' + it.number + ']';
+          if (it.type === 'table')    return it.rows.map(r => r.map(c => c.text || '').join('\t')).join('\n');
+        }
+        return '';
+      }).filter(Boolean).join('\n');
+      if (text) e.clipboardData.setData('text/plain', text);
+      e.preventDefault();
+    } catch (_) {
+      // setData isn't allowed outside of copy/cut events in some browsers —
+      // we still have _internalClipboard for in-tab paste.
+    }
+  });
+
+  document.addEventListener('cut', (e) => {
+    if (isEditing() || isFormFocused()) return;
+    const items = [...state.selected];
+    if (!items.length) return;
+    const payload = _serializeForClipboard(items);
+    _internalClipboard = payload;
+    try {
+      e.clipboardData.setData(CLIPBOARD_MIME, JSON.stringify(payload));
+      e.preventDefault();
+    } catch (_) {}
+    deleteSelected();
+  });
+
   document.addEventListener('paste', (e) => {
     if (isEditing() || isFormFocused()) return;
     const cd = e.clipboardData;
-    if (!cd) return;
+    if (!cd) {
+      // No system-clipboard access — fall back to our internal store.
+      if (_pasteSerialized(_internalClipboard)) e.preventDefault();
+      return;
+    }
+    // Internal mind-map payload takes priority.
+    const ownPayload = cd.getData(CLIPBOARD_MIME);
+    if (ownPayload) {
+      try {
+        const data = JSON.parse(ownPayload);
+        if (_pasteSerialized(data)) {
+          e.preventDefault();
+          return;
+        }
+      } catch (_) {}
+    }
+    // No payload in the system clipboard (e.g. cross-tab) — try the
+    // in-memory copy.
+    if (_internalClipboard && !cd.items?.length && !cd.files?.length &&
+        !cd.getData('text/html') && !cd.getData('text/plain')) {
+      if (_pasteSerialized(_internalClipboard)) {
+        e.preventDefault();
+        return;
+      }
+    }
     const w = _pastePosition();
 
     // 1) image FILE in the clipboard (e.g. system screenshot, copied image)
@@ -2479,6 +2927,158 @@
     const url = (dt.getData('text/uri-list') || dt.getData('text/plain') || '')
                   .split('\n')[0].trim();
     if (url && /^(https?:|data:|blob:)/i.test(url)) createImageNode(w.x, w.y, url);
+  });
+
+  /* ============================ IMAGE CROPPER ============================
+     Double-clicking an image opens a modal where the user drags a rectangle
+     over the image to choose a crop region. Apply re-renders the image data
+     via canvas and replaces the node's src so the crop is permanent.       */
+
+  let _cropNode = null;
+  // Crop rectangle in DISPLAYED pixels (relative to the rendered image).
+  let _cropBox = { x: 0, y: 0, w: 0, h: 0 };
+  // Natural image dimensions (set once the image has loaded).
+  let _cropNatural = { w: 0, h: 0 };
+
+  function _applyCropRect() {
+    cropRect.style.left   = _cropBox.x + 'px';
+    cropRect.style.top    = _cropBox.y + 'px';
+    cropRect.style.width  = _cropBox.w + 'px';
+    cropRect.style.height = _cropBox.h + 'px';
+  }
+  function _clampCrop() {
+    const W = cropImg.clientWidth;
+    const H = cropImg.clientHeight;
+    if (_cropBox.w < 12) _cropBox.w = 12;
+    if (_cropBox.h < 12) _cropBox.h = 12;
+    if (_cropBox.w > W)  _cropBox.w = W;
+    if (_cropBox.h > H)  _cropBox.h = H;
+    if (_cropBox.x < 0)  _cropBox.x = 0;
+    if (_cropBox.y < 0)  _cropBox.y = 0;
+    if (_cropBox.x + _cropBox.w > W) _cropBox.x = W - _cropBox.w;
+    if (_cropBox.y + _cropBox.h > H) _cropBox.y = H - _cropBox.h;
+  }
+  function _resetCrop() {
+    const W = cropImg.clientWidth, H = cropImg.clientHeight;
+    _cropBox = { x: 0, y: 0, w: W, h: H };
+    _applyCropRect();
+  }
+  function openCropper(node) {
+    if (!node || node.type !== 'image' || !node.src) return;
+    _cropNode = node;
+    cropImg.onload = () => {
+      _cropNatural = { w: cropImg.naturalWidth || 0, h: cropImg.naturalHeight || 0 };
+      _resetCrop();
+    };
+    cropImg.src = node.src;
+    cropModal.classList.add('show');
+    // If the image was already cached, onload may not fire — reset on next frame.
+    requestAnimationFrame(() => {
+      if (cropImg.complete && cropImg.naturalWidth) {
+        _cropNatural = { w: cropImg.naturalWidth, h: cropImg.naturalHeight };
+        _resetCrop();
+      }
+    });
+  }
+  function closeCropper() {
+    cropModal.classList.remove('show');
+    _cropNode = null;
+    cropImg.src = '';
+  }
+  function applyCrop() {
+    const node = _cropNode;
+    if (!node) return;
+    const W = cropImg.clientWidth, H = cropImg.clientHeight;
+    if (!W || !H || !_cropNatural.w || !_cropNatural.h) { closeCropper(); return; }
+    const sx = _cropBox.x / W * _cropNatural.w;
+    const sy = _cropBox.y / H * _cropNatural.h;
+    const sw = _cropBox.w / W * _cropNatural.w;
+    const sh = _cropBox.h / H * _cropNatural.h;
+    const can = document.createElement('canvas');
+    can.width  = Math.max(1, Math.round(sw));
+    can.height = Math.max(1, Math.round(sh));
+    const ctx = can.getContext('2d');
+    try {
+      ctx.drawImage(cropImg, sx, sy, sw, sh, 0, 0, can.width, can.height);
+      const url = can.toDataURL('image/png');
+      node.src = url;
+      node.img.src = url;
+      saveNow();
+    } catch (err) {
+      console.warn('crop failed', err);
+      alert('Could not crop this image (it may be cross-origin).');
+    }
+    closeCropper();
+  }
+  cropApplyBtn.addEventListener('click', applyCrop);
+  cropCancelBtn.addEventListener('click', closeCropper);
+  cropResetBtn.addEventListener('click', _resetCrop);
+  cropModal.addEventListener('mousedown', (e) => {
+    if (e.target === cropModal) closeCropper();
+  });
+
+  // Drag the rectangle body to move it.
+  cropRect.addEventListener('mousedown', (e) => {
+    if (e.target !== cropRect) return; // handles get their own handlers
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const start = { x: e.clientX, y: e.clientY };
+    const sp = { x: _cropBox.x, y: _cropBox.y };
+    bindDrag((ev) => {
+      _cropBox.x = sp.x + (ev.clientX - start.x);
+      _cropBox.y = sp.y + (ev.clientY - start.y);
+      _clampCrop();
+      _applyCropRect();
+    });
+  });
+
+  // Corner-handle resize.
+  cropRect.querySelectorAll('.crop-handle').forEach(h => {
+    h.addEventListener('mousedown', (e) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const corner = h.classList.contains('nw') ? 'nw'
+                   : h.classList.contains('ne') ? 'ne'
+                   : h.classList.contains('sw') ? 'sw' : 'se';
+      const start = { x: e.clientX, y: e.clientY };
+      const sb = { ..._cropBox };
+      bindDrag((ev) => {
+        const dx = ev.clientX - start.x;
+        const dy = ev.clientY - start.y;
+        let nx = sb.x, ny = sb.y, nw = sb.w, nh = sb.h;
+        if (corner === 'nw') { nx = sb.x + dx; ny = sb.y + dy; nw = sb.w - dx; nh = sb.h - dy; }
+        if (corner === 'ne') {                 ny = sb.y + dy; nw = sb.w + dx; nh = sb.h - dy; }
+        if (corner === 'sw') { nx = sb.x + dx;                 nw = sb.w - dx; nh = sb.h + dy; }
+        if (corner === 'se') {                                 nw = sb.w + dx; nh = sb.h + dy; }
+        _cropBox = { x: nx, y: ny, w: nw, h: nh };
+        _clampCrop();
+        _applyCropRect();
+      });
+    });
+  });
+
+  // Begin a fresh crop rect by dragging on the image itself.
+  cropStage.addEventListener('mousedown', (e) => {
+    if (e.target !== cropStage && e.target !== cropImg) return;
+    if (e.button !== 0) return;
+    e.preventDefault();
+    const sr = cropImg.getBoundingClientRect();
+    const sx = e.clientX - sr.left;
+    const sy = e.clientY - sr.top;
+    _cropBox = { x: sx, y: sy, w: 0, h: 0 };
+    _applyCropRect();
+    bindDrag((ev) => {
+      const ex = ev.clientX - sr.left;
+      const ey = ev.clientY - sr.top;
+      _cropBox.x = Math.min(sx, ex);
+      _cropBox.y = Math.min(sy, ey);
+      _cropBox.w = Math.abs(ex - sx);
+      _cropBox.h = Math.abs(ey - sy);
+      _clampCrop();
+      _applyCropRect();
+    });
   });
 
   /* ============================ LIGHTBOX ============================ */
@@ -2593,7 +3193,8 @@
       if (!state.selected.has(target)) selectOnly(target);
 
       if (target.kind === 'node' && target.type === 'image') {
-        addItem('Open / Zoom Image', () => openLightbox(target.src));
+        addItem('Crop Image… (double-click)', () => openCropper(target));
+        addItem('Open / Zoom Image (Shift+dbl-click)', () => openLightbox(target.src));
         addSep();
       }
       if (target.kind === 'node' && target.type === 'text') {
@@ -2603,6 +3204,8 @@
         addItem('Convert to Text', () => convertNodeType(target, 'text'));
         addSep();
       } else if (target.kind === 'node' && target.type === 'shape') {
+        addItem('Edit Colour… (double-click)', () => openShapePopup(target));
+        addSep();
         addHint('Change shape:');
         addShapeRow((shape) => setShapeType(target, shape));
         addSep();
@@ -2672,7 +3275,7 @@
         try { localStorage.removeItem(STORAGE_KEY); } catch (e) {}
       }, { danger: true });
       addSep();
-      addHint('A = arrow mode · Ctrl+drag = arrow · Shift+Ctrl+drag = rectangle · V = menu · double-click empty = add text · Alt+click = cycle stacked · Space+drag = pan');
+      addHint('A = arrow mode · Ctrl+drag = arrow · Ctrl+Alt+drag = red arrow · Shift+Ctrl+drag = rectangle · Ctrl+C/X/V = copy/cut/paste · double-click image = crop · double-click shape = colour · Space+drag = pan');
     }
 
     ctxMenu.style.left = e.clientX + 'px';
