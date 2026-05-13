@@ -135,6 +135,9 @@
   }
 
   .node { position: absolute; user-select: none; }
+  /* Pre-promote dragged nodes to their own GPU layer so transform-based
+     dragging is smooth and leaves no paint trails on the canvas behind. */
+  .node.dragging { will-change: transform; }
 
   .node.text {
     white-space: pre;
@@ -857,7 +860,7 @@
   // Wheel order, clockwise from the top.
   const SHAPE_WHEEL_ORDER = ['star', 'heart', 'rect', 'ellipse', 'triangle', 'diamond'];
   const SHAPE_ICON = { rect:'▭', ellipse:'○', triangle:'△', diamond:'◇', star:'☆', heart:'♡' };
-  const SHAPE_DEFAULT = { fill: 'none', stroke: '#18181b', strokeWidth: 1.5 };
+  const SHAPE_DEFAULT = { fill: 'none', stroke: '#ef4444', strokeWidth: 1.5 };
 
   function makeShapeSvg(shape) {
     let el;
@@ -1488,19 +1491,32 @@
     const startArrowPts = new Map();
     for (const a of as) startArrowPts.set(a, a.points.map(p => ({ x: p.x, y: p.y })));
     let didMove = false;
+    let lastDx = 0, lastDy = 0;
 
     bindDrag((ev) => {
       if (!didMove) {
         const d = Math.abs(ev.clientX - startMouse.x) + Math.abs(ev.clientY - startMouse.y);
         if (d > 3) didMove = true;
+        if (didMove) {
+          // Promote each dragged node to its own GPU layer so the
+          // following transform updates don't trigger a paint of the
+          // canvas behind it. Without this, fast drags leave smeared
+          // strokes / image fragments behind the moving node.
+          for (const n of ns) n.el.classList.add('dragging');
+        }
       }
       if (!didMove) return;
       const dx = (ev.clientX - startMouse.x) / view.scale;
       const dy = (ev.clientY - startMouse.y) / view.scale;
+      lastDx = dx; lastDy = dy;
+      // Shift each node via CSS transform instead of poking left/top.
+      // Transforms are composited (no reflow, no per-frame repaint of the
+      // old position) which kills the paint-trail glitch on fast moves.
       for (const n of ns) {
-        const sp = startNodePos.get(n);
-        setNodePos(n, sp.x + dx, sp.y + dy);
+        n.el.style.transform = 'translate(' + dx + 'px,' + dy + 'px)';
       }
+      // Arrows are SVG paths inside a single layer — re-rendering points
+      // is already cheap and trail-free.
       for (const a of as) {
         const orig = startArrowPts.get(a);
         a.points = orig.map(p => ({ x: p.x + dx, y: p.y + dy }));
@@ -1508,8 +1524,19 @@
       }
       repositionStylePopup();
     }, () => {
-      if (didMove) scheduleSave();
-      else if (deselectOnNoMove && state.selected.has(deselectOnNoMove)) {
+      if (didMove) {
+        // Commit the transform delta to left/top, then clear the
+        // transform. Setting both in the same synchronous batch — without
+        // a layout read between them — means the browser paints the final
+        // position in one go, no flicker.
+        for (const n of ns) {
+          const sp = startNodePos.get(n);
+          setNodePos(n, sp.x + lastDx, sp.y + lastDy);
+          n.el.style.transform = '';
+          n.el.classList.remove('dragging');
+        }
+        scheduleSave();
+      } else if (deselectOnNoMove && state.selected.has(deselectOnNoMove)) {
         state.selected.delete(deselectOnNoMove);
         deselectOnNoMove.el.classList.remove('selected');
         updateStylePopup();
