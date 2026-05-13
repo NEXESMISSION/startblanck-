@@ -1158,6 +1158,15 @@
   let _saveTimer = null;
   let _dbPromise = null;
 
+  // Undo / redo state. These were missing — `saveNow()` was throwing a
+  // ReferenceError on every call (silently, since it runs inside a
+  // setTimeout from scheduleSave), so no snapshots were ever recorded
+  // and the history bar buttons stayed disabled forever.
+  const MAX_UNDO = 100;
+  const _undoStack = [];
+  const _redoStack = [];
+  let _suppressUndo = false;
+
   function _openDb() {
     if (_dbPromise) return _dbPromise;
     if (!window.indexedDB) return Promise.reject(new Error('no indexedDB'));
